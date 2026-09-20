@@ -1,16 +1,12 @@
-name: Build GKI 5.10.270 Kernel with Latest KernelSU
+name: Build GKI 5.10 Kernel with KernelSU
 
 on:
   workflow_dispatch:
     inputs:
-      kernel_sublevel:
-        description: 'Target 5.10.y version tag (e.g. v5.10.270)'
+      ksu_tag:
+        description: 'KernelSU tag (e.g. v1.0.5)'
         required: true
-        default: 'v5.10.270'
-      ksu_branch:
-        description: 'KernelSU branch / tag (e.g. main)'
-        required: true
-        default: 'main'
+        default: 'v1.0.5'
 
 jobs:
   build:
@@ -42,91 +38,71 @@ jobs:
       - name: Setup LLVM / Clang Toolchain
         run: |
           mkdir -p toolchain
-          CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-rc3-x86_64.tar.xz"
-          echo "[+] Downloading LLVM toolchain..."
-          curl -fL "$CLANG_URL" | tar -xJf - -C toolchain --strip-components=1
+          # Use a stable LLVM 17 release — proven compatible with 5.10 GKI builds
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz"
+          echo "[+] Downloading Android Clang toolchain..."
+          # Fallback: use kernel.org LLVM 17 if Android prebuilt fails
+          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1 || {
+            echo "[!] LLVM 17 not found, trying LLVM 18..."
+            curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-18.1.8-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
+          }
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
 
-      - name: Fetch Kernel Source & Update to 5.10.270
+      - name: Fetch Android Common Kernel 5.10
         run: |
-          echo "[+] Cloning Android Common Kernel 5.10..."
-          git clone --depth 100 -b android12-5.10-stg-damon https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
+          echo "[+] Cloning Android Common Kernel 5.10 (Rama982 DAMON tree)..."
+          git clone --depth 1 -b android12-5.10-stg-damon \
+            https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
-          
-          echo "[+] Adding Linux Stable Remote..."
-          git remote add stable https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-          git fetch --depth 1 stable tag ${{ github.event.inputs.kernel_sublevel || 'v5.10.270' }} || true
-          
-          echo "[+] Merging ${{ github.event.inputs.kernel_sublevel || 'v5.10.270' }}..."
-          git config user.name "Kernel Builder"
-          git config user.email "builder@github.com"
-          git merge --allow-unrelated-histories -X theirs --no-edit FETCH_HEAD || git merge --abort || echo "Proceeding with tree."
-          
-          # Set version to 5.10.270 in Makefile
-          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
+
+          # DO NOT merge upstream v5.10.270 — it destroys Android-specific code
+          # (CFI macros, security_inode_init_security_anon, vendor hooks, etc.)
+          # Instead, just bump the sublevel in the Makefile for versioning.
+          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' Makefile)
+          echo "[+] Current kernel sublevel: 5.10.$SUBLEVEL"
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
 
-          # Ensure Android Clang CFI macros (__nocfi, __cficanonical, __noscs) exist after upstream merge
-          grep -q "__nocfi" include/linux/compiler_types.h || printf "\n#ifndef __nocfi\n#define __nocfi\n#endif\n#ifndef __cficanonical\n#define __cficanonical\n#endif\n#ifndef __noscs\n#define __noscs\n#endif\n" >> include/linux/compiler_types.h
-          grep -q "__nocfi" include/linux/compiler-clang.h || printf "\n#ifndef __nocfi\n#define __nocfi __attribute__((__no_sanitize__(\"cfi\")))\n#endif\n#ifndef __cficanonical\n#define __cficanonical __attribute__((__cfi_canonical_jump_table__))\n#endif\n" >> include/linux/compiler-clang.h
-
-      - name: Integrate Latest KernelSU
+      - name: Integrate KernelSU
         run: |
           cd kernel_src
-          echo "[+] Running KernelSU setup script..."
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s ${{ github.event.inputs.ksu_branch || 'main' }}
-          
+          KSU_TAG="${{ github.event.inputs.ksu_tag || 'v1.0.5' }}"
+          echo "[+] Setting up KernelSU ${KSU_TAG}..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "${KSU_TAG}"
+
           # Ensure driver entries exist
           grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
-          # Fix KernelSU ksys_close vs close_fd for Linux 5.10.220+
-          echo "[+] Patching KernelSU util.h for Linux 5.10.270..."
-          find drivers/kernelsu/ KernelSU/ -name "util.h" 2>/dev/null | while read -r f; do
-            echo "Patching $f..."
-            sed -i 's/KERNEL_VERSION(5, 11, 0)/KERNEL_VERSION(5, 10, 0)/g' "$f"
-            sed -i 's/ksys_close/close_fd/g' "$f"
-            grep -q "extern int close_fd" "$f" || printf "\nextern int close_fd(unsigned int fd);\n" >> "$f"
-          done
-
-          # Also ensure KernelSU Kbuild defines __nocfi
-          find drivers/kernelsu/ KernelSU/ -name "Kbuild" 2>/dev/null | while read -r f; do
-            echo "ccflags-y += -D__nocfi=" >> "$f"
-          done
-
-      - name: Apply Compiler Warnings and Frame Size Fixes
-        run: |
-          cd kernel_src
-          # Fix stack frame size warning in io_uring for LLVM 23
-          echo "CFLAGS_io_uring.o += -Wno-frame-larger-than" >> io_uring/Makefile
+          echo "[+] KernelSU ${KSU_TAG} integrated."
 
       - name: Configure Kernel
         run: |
           cd kernel_src
           mkdir -p out
-          
-          echo "-Rama982-5.10.270-KSU" > .scmversion
-          
+
+          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' Makefile)
+          echo "-Rama982-5.10.${SUBLEVEL}-KSU" > .scmversion
+
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
             CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 \
             gki_defconfig
-          
-          # Enable KSU, OverlayFS, and Kprobes; adjust FRAME_WARN
+
+          # Enable KSU, OverlayFS, Kprobes, and DAMON
           scripts/config --file out/.config \
-            -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_NONE -d LTO_CLANG_FULL \
-            -e KSU -e OVERLAY_FS -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e DAMON \
-            --set-val CONFIG_FRAME_WARN 4096 \
-            -d WERROR
-            
+            -e KSU -e OVERLAY_FS \
+            -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS \
+            -e DAMON \
+            --set-val CONFIG_FRAME_WARN 4096
+
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
             CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 \
-            olddefconfig savedefconfig
+            olddefconfig
 
       - name: Compile Kernel (Image)
         run: |
@@ -137,13 +113,12 @@ jobs:
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
             CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 \
-            LOCALVERSION="-Rama982-5.10.270-KSU" \
-            KCFLAGS="-Wno-error -Wno-error=frame-larger-than -Wno-frame-larger-than" \
-            WERROR=0 \
+            KCFLAGS="-Wno-error" \
             Image
 
       - name: Package AnyKernel3 Zip
         run: |
+          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' kernel_src/Makefile)
           mkdir -p artifacts
           if [ ! -f "tools/AnyKernel3/anykernel.sh" ]; then
             echo "[+] Cloning AnyKernel3..."
@@ -152,14 +127,17 @@ jobs:
           fi
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 ../../artifacts/AK3-GKI-5.10.270-KSU.zip * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/AK3-GKI-5.10.${SUBLEVEL}-KSU.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
       - name: Repack Stock boot.img
         run: |
+          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' kernel_src/Makefile)
           if [ -f "Stockimgs/boot.img" ]; then
-            echo "[+] Repacking Stockimgs/boot.img with new 5.10.270 Kernel..."
-            python3 tools/repack_boot.py Stockimgs/boot.img kernel_src/out/arch/arm64/boot/Image artifacts/boot-5.10.270-KSU.img
+            echo "[+] Repacking Stockimgs/boot.img with new kernel..."
+            python3 tools/repack_boot.py Stockimgs/boot.img \
+              kernel_src/out/arch/arm64/boot/Image \
+              "artifacts/boot-5.10.${SUBLEVEL}-KSU.img"
           else
             echo "[-] No Stockimgs/boot.img found, skipping repack."
           fi
@@ -167,6 +145,6 @@ jobs:
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-5.10.270-KernelSU-Build
+          name: GKI-5.10-KernelSU-Build
           path: artifacts/*
           if-no-files-found: error
