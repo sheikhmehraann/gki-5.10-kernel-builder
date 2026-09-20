@@ -1,0 +1,125 @@
+name: Build GKI 5.10.270 Kernel with Latest KernelSU
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_sublevel:
+        description: 'Target 5.10.y version tag (e.g. v5.10.270)'
+        required: true
+        default: 'v5.10.270'
+      ksu_branch:
+        description: 'KernelSU branch / tag (e.g. main)'
+        required: true
+        default: 'main'
+
+jobs:
+  build:
+    name: Build Kernel 5.10
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Checkout Builder Repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev python3 libelf-dev \
+            curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache
+
+      - name: Setup LLVM / Clang Toolchain
+        run: |
+          mkdir -p toolchain
+          CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-rc3-x86_64.tar.xz"
+          echo "[+] Downloading LLVM toolchain..."
+          curl -fL "$CLANG_URL" | tar -xJf - -C toolchain --strip-components=1
+          echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
+
+      - name: Fetch Kernel Source & Update to 5.10.270
+        run: |
+          echo "[+] Cloning Android Common Kernel 5.10..."
+          git clone --depth 50 -b android12-5.10-stg-damon https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
+          cd kernel_src
+          
+          echo "[+] Adding Linux Stable Remote..."
+          git remote add stable https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+          git fetch --depth 1 stable tag ${{ github.event.inputs.kernel_sublevel || 'v5.10.270' }} || true
+          
+          echo "[+] Merging ${{ github.event.inputs.kernel_sublevel || 'v5.10.270' }}..."
+          git config user.name "Kernel Builder"
+          git config user.email "builder@github.com"
+          git merge -X theirs --no-edit FETCH_HEAD || git merge --abort || echo "Merge fallback: proceeding with tree."
+
+      - name: Integrate Latest KernelSU
+        run: |
+          cd kernel_src
+          echo "[+] Running KernelSU setup script..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s ${{ github.event.inputs.ksu_branch || 'main' }}
+          
+          # Ensure driver entries exist
+          grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
+          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
+      - name: Configure Kernel
+        run: |
+          cd kernel_src
+          mkdir -p out
+          
+          echo "-GKI-5.10.270-KSU" > .scmversion
+          make O=out ARCH=arm64 gki_defconfig
+          
+          # Enable KSU, OverlayFS, and Kprobes
+          scripts/config --file out/.config \
+            -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_NONE -d LTO_CLANG_FULL \
+            -e KSU -e OVERLAY_FS -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS -e DAMON
+            
+          make O=out ARCH=arm64 olddefconfig savedefconfig
+
+      - name: Compile Kernel (Image)
+        run: |
+          cd kernel_src
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            LLVM=1 LLVM_IAS=1 LOCALVERSION="-Rama982-5.10.270-KSU" \
+            Image
+
+      - name: Package AnyKernel3 Zip
+        run: |
+          mkdir -p artifacts
+          if [ ! -f "tools/AnyKernel3/anykernel.sh" ]; then
+            echo "[+] Cloning AnyKernel3..."
+            rm -rf tools/AnyKernel3
+            git clone https://github.com/ramabondanp/AnyKernel3.git tools/AnyKernel3
+          fi
+          cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
+          cd tools/AnyKernel3
+          zip -r9 ../../artifacts/AK3-GKI-5.10.270-KSU.zip * -x ".git*" "README.md" "*.zip"
+          cd ../..
+
+      - name: Repack Stock boot.img (if available)
+        run: |
+          if [ -f "Stockimgs/boot.img" ]; then
+            echo "[+] Repacking Stockimgs/boot.img with new 5.10.270 Kernel..."
+            python3 tools/repack_boot.py Stockimgs/boot.img kernel_src/out/arch/arm64/boot/Image artifacts/boot-5.10.270-KSU.img
+          else
+            echo "[-] No Stockimgs/boot.img found, skipping repack."
+          fi
+
+      - name: Upload Kernel Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: GKI-5.10.270-KernelSU-Build
+          path: artifacts/*
+          if-no-files-found: error

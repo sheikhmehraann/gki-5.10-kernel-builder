@@ -1,0 +1,15 @@
+# Root Kernel Workspace .gitignore
+
+# Temporary outputs & logs
+builds/extracted/
+out/
+*.tmp
+*.log
+Stockimgs/stock_kernel_Image*
+Stockimgs/ramdisk.img
+
+# Toolchain
+tools/toolchain/
+
+# Ignore local huge source clone in builder repo (Actions clones it fresh on Ubuntu)
+sources/
