@@ -63,25 +63,29 @@ jobs:
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
           echo "[+] Kernel sublevel set to 5.10.270"
 
-      - name: Integrate KernelSU
+      - name: Integrate SukiSU-Ultra (Supports KSU Latest, KSU-Next, SukiSU Ultra)
         run: |
           cd kernel_src
-          KSU_TAG="${{ github.event.inputs.ksu_tag || 'v1.0.5' }}"
-          echo "[+] Setting up KernelSU ${KSU_TAG}..."
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "${KSU_TAG}"
+          echo "[+] Setting up SukiSU-Ultra..."
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
           # Ensure driver entries exist
           grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
-          echo "[+] KernelSU ${KSU_TAG} integrated."
+          # Ensure driver version is 40900 (UAPI v2) for full compatibility with all latest managers
+          find drivers/kernelsu/ KernelSU/ -name "Kbuild" 2>/dev/null | while read -r f; do
+            echo "ccflags-y += -DKSU_VERSION=40900 -DKSU_VERSION_FULL=\\\"v4.2.0-Mehraan-Ultra\\\"" >> "$f"
+          done
+
+          echo "[+] SukiSU-Ultra integrated successfully."
 
       - name: Configure Kernel
         run: |
           cd kernel_src
           mkdir -p out
 
-          echo "-Mehraan-5.10.270-KSU" > .scmversion
+          echo "-Mehraan-5.10.270-Ultra-KSU" > .scmversion
 
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
@@ -138,7 +142,7 @@ jobs:
           
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/AK3-GKI-5.10.270-KSU.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/AK3-GKI-5.10.270-Mehraan-KSU.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
       - name: Repack Stock boot.img
@@ -147,14 +151,21 @@ jobs:
             echo "[+] Repacking Stockimgs/boot.img with new kernel..."
             python3 tools/repack_boot.py Stockimgs/boot.img \
               kernel_src/out/arch/arm64/boot/Image \
-              "artifacts/boot-5.10.270-KSU.img"
+              "artifacts/boot-5.10.270-Mehraan-KSU.img"
           else
             echo "[-] No Stockimgs/boot.img found, skipping repack."
+          fi
+
+      - name: Include Latest Root Managers in Artifacts
+        run: |
+          if [ -d "managers" ]; then
+            echo "[+] Copying latest Root Managers to artifacts..."
+            cp -vf managers/*.apk artifacts/
           fi
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-5.10-KernelSU-Build
+          name: GKI-5.10.270-Kernel-By-Mehraan-UltraKSU
           path: artifacts/*
           if-no-files-found: error
