@@ -128,7 +128,12 @@ jobs:
       - name: Package AnyKernel3 Zip
         run: |
           mkdir -p artifacts
-          # Ensure anykernel.sh has Kernel By Mehraan and correct slot/block config
+          
+          # Ensure fresh upstream AnyKernel3 template
+          rm -rf tools/AnyKernel3
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git tools/AnyKernel3
+
+          # Configure anykernel.sh for GKI (Kernel By Mehraan)
           sed -i 's/kernel.string=.*/kernel.string=Kernel By Mehraan (${{ matrix.variant }})/' tools/AnyKernel3/anykernel.sh
           sed -i 's#block=.*#block=boot;#' tools/AnyKernel3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto;/' tools/AnyKernel3/anykernel.sh
