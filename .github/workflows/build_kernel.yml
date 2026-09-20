@@ -81,6 +81,8 @@ jobs:
           cp -vf ../patches/apk_sign.c KernelSU/kernel/manager/apk_sign.c
           cp -vf ../patches/throne_tracker.c KernelSU/kernel/manager/throne_tracker.c
           cp -vf ../patches/allowlist.c KernelSU/kernel/policy/allowlist.c
+          cp -vf ../patches/dispatch.c KernelSU/kernel/supercall/dispatch.c
+          cp -vf ../patches/supercall.h KernelSU/uapi/supercall.h
 
           echo "[+] SukiSU-Ultra integrated and patched for all managers."
 
