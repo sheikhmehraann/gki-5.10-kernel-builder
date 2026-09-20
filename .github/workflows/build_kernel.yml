@@ -36,7 +36,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential bc bison flex libssl-dev python3 libelf-dev \
-            curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache
+            curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Setup LLVM / Clang Toolchain
         run: |
@@ -87,7 +88,13 @@ jobs:
           mkdir -p out
           
           echo "-Rama982-5.10.270-KSU" > .scmversion
-          make O=out ARCH=arm64 gki_defconfig
+          
+          make O=out ARCH=arm64 SUBARCH=arm64 \
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 \
+            gki_defconfig
           
           # Enable KSU, OverlayFS, and Kprobes; adjust FRAME_WARN
           scripts/config --file out/.config \
@@ -96,13 +103,23 @@ jobs:
             --set-val CONFIG_FRAME_WARN 4096 \
             -d WERROR
             
-          make O=out ARCH=arm64 olddefconfig savedefconfig
+          make O=out ARCH=arm64 SUBARCH=arm64 \
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 \
+            olddefconfig savedefconfig
 
       - name: Compile Kernel (Image)
         run: |
           cd kernel_src
-          make -j$(nproc --all) O=out ARCH=arm64 \
-            LLVM=1 LLVM_IAS=1 LOCALVERSION="-Rama982-5.10.270-KSU" \
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 SUBARCH=arm64 \
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1 \
+            LOCALVERSION="-Rama982-5.10.270-KSU" \
             KCFLAGS="-Wno-error=frame-larger-than -Wno-frame-larger-than" \
             WERROR=0 \
             Image
