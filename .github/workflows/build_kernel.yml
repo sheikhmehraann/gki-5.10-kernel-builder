@@ -96,22 +96,25 @@ jobs:
           make O=out gki_defconfig
 
           # Common config: ThinLTO for fast CI builds, DAMON, skip CFI check, disable WERROR
+          # CRITICAL: Disable experimental backported MGLRU (LRU_GEN) which causes vm_map_ram page table overflow crashes with MTK MKP
           scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
             -e DAMON \
             -e CFI_FORCE_SKIP_CHECK \
             -d WERROR \
+            -d LRU_GEN -d LRU_GEN_ENABLED \
+            -e OVERLAY_FS -e OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW \
             --set-val CONFIG_FRAME_WARN 2048
 
           if [ "${{ matrix.variant }}" = "KSU" ]; then
             echo "[+] Configuring with SukiSU-Ultra root support..."
             scripts/config --file out/.config \
-              -e KSU -e OVERLAY_FS \
+              -e KSU \
               -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS
           else
             echo "[+] Configuring noSU (pure stock kernel, NO ROOT)..."
             scripts/config --file out/.config \
-              -d KSU -d OVERLAY_FS
+              -d KSU
           fi
 
           make O=out olddefconfig savedefconfig
