@@ -67,26 +67,8 @@ jobs:
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
 
           # Ensure Android Clang CFI macros (__nocfi, __cficanonical, __noscs) exist after upstream merge
-          grep -q "__nocfi" include/linux/compiler_types.h || cat << 'EOF' >> include/linux/compiler_types.h
-#ifndef __nocfi
-# define __nocfi
-#endif
-#ifndef __cficanonical
-# define __cficanonical
-#endif
-#ifndef __noscs
-# define __noscs
-#endif
-EOF
-
-          grep -q "__nocfi" include/linux/compiler-clang.h || cat << 'EOF' >> include/linux/compiler-clang.h
-#ifndef __nocfi
-# define __nocfi __attribute__((__no_sanitize__("cfi")))
-#endif
-#ifndef __cficanonical
-# define __cficanonical __attribute__((__cfi_canonical_jump_table__))
-#endif
-EOF
+          grep -q "__nocfi" include/linux/compiler_types.h || printf "\n#ifndef __nocfi\n#define __nocfi\n#endif\n#ifndef __cficanonical\n#define __cficanonical\n#endif\n#ifndef __noscs\n#define __noscs\n#endif\n" >> include/linux/compiler_types.h
+          grep -q "__nocfi" include/linux/compiler-clang.h || printf "\n#ifndef __nocfi\n#define __nocfi __attribute__((__no_sanitize__(\"cfi\")))\n#endif\n#ifndef __cficanonical\n#define __cficanonical __attribute__((__cfi_canonical_jump_table__))\n#endif\n" >> include/linux/compiler-clang.h
 
       - name: Integrate Latest KernelSU
         run: |
