@@ -2,6 +2,9 @@ name: Build GKI 5.10.270 Kernel (KSU & noSU)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
