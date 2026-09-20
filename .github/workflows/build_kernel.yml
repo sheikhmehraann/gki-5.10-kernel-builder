@@ -72,7 +72,14 @@ jobs:
             echo "ccflags-y += -DKSU_VERSION=40900 -DKSU_VERSION_FULL=\\\"v4.2.0-Mehraan-Ultra\\\"" >> "$f"
           done
 
-          echo "[+] SukiSU-Ultra integrated successfully."
+          # Apply Universal Multi-Manager Support (Official KSU, KSU-Next, SukiSU Ultra)
+          echo "[+] Applying Universal Multi-Manager patches..."
+          cp -vf ../patches/manager_identity.h KernelSU/kernel/manager/manager_identity.h
+          cp -vf ../patches/apk_sign.c KernelSU/kernel/manager/apk_sign.c
+          cp -vf ../patches/throne_tracker.c KernelSU/kernel/manager/throne_tracker.c
+          cp -vf ../patches/allowlist.c KernelSU/kernel/policy/allowlist.c
+
+          echo "[+] SukiSU-Ultra integrated and patched for all managers."
 
       - name: Configure Kernel
         run: |

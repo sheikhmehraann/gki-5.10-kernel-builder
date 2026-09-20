@@ -13,3 +13,5 @@ tools/toolchain/
 
 # Ignore local huge source clone in builder repo (Actions clones it fresh on Ubuntu)
 sources/
+temp/
+tools/SukiSU-Ultra/
