@@ -126,6 +126,15 @@ jobs:
           sed -i 's/kernel.string=.*/kernel.string=Kernel By Mehraan/' tools/AnyKernel3/anykernel.sh
           sed -i 's#block=.*#block=boot;#' tools/AnyKernel3/anykernel.sh
           sed -i 's/is_slot_device=.*/is_slot_device=auto;/' tools/AnyKernel3/anykernel.sh
+          sed -i 's/dump_boot;/split_boot;\nflash_boot;/' tools/AnyKernel3/anykernel.sh
+          sed -i '/write_boot;/d' tools/AnyKernel3/anykernel.sh
+          rm -rf tools/AnyKernel3/ramdisk/overlay.d
+          
+          # Use modern Header v4-compatible magiskboot
+          if [ -f "tools/magiskboot_arm64" ]; then
+            cp -vf tools/magiskboot_arm64 tools/AnyKernel3/tools/magiskboot
+            chmod +x tools/AnyKernel3/tools/magiskboot
+          fi
           
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
