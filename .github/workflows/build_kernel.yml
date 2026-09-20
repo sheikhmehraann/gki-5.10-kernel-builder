@@ -76,6 +76,15 @@ jobs:
           grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
+          # Fix KernelSU ksys_close vs close_fd for Linux 5.10.220+
+          echo "[+] Patching KernelSU util.h for Linux 5.10.270..."
+          find drivers/kernelsu/ KernelSU/ -name "util.h" 2>/dev/null | while read -r f; do
+            echo "Patching $f..."
+            sed -i 's/KERNEL_VERSION(5, 11, 0)/KERNEL_VERSION(5, 10, 0)/g' "$f"
+            sed -i 's/ksys_close/close_fd/g' "$f"
+            grep -q "extern int close_fd" "$f" || printf "\nextern int close_fd(unsigned int fd);\n" >> "$f"
+          done
+
       - name: Apply Compiler Warnings and Frame Size Fixes
         run: |
           cd kernel_src
@@ -120,7 +129,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1 \
             LOCALVERSION="-Rama982-5.10.270-KSU" \
-            KCFLAGS="-Wno-error=frame-larger-than -Wno-frame-larger-than" \
+            KCFLAGS="-Wno-error -Wno-error=frame-larger-than -Wno-frame-larger-than" \
             WERROR=0 \
             Image
 
