@@ -66,6 +66,28 @@ jobs:
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
 
+          # Ensure Android Clang CFI macros (__nocfi, __cficanonical, __noscs) exist after upstream merge
+          grep -q "__nocfi" include/linux/compiler_types.h || cat << 'EOF' >> include/linux/compiler_types.h
+#ifndef __nocfi
+# define __nocfi
+#endif
+#ifndef __cficanonical
+# define __cficanonical
+#endif
+#ifndef __noscs
+# define __noscs
+#endif
+EOF
+
+          grep -q "__nocfi" include/linux/compiler-clang.h || cat << 'EOF' >> include/linux/compiler-clang.h
+#ifndef __nocfi
+# define __nocfi __attribute__((__no_sanitize__("cfi")))
+#endif
+#ifndef __cficanonical
+# define __cficanonical __attribute__((__cfi_canonical_jump_table__))
+#endif
+EOF
+
       - name: Integrate Latest KernelSU
         run: |
           cd kernel_src
@@ -83,6 +105,11 @@ jobs:
             sed -i 's/KERNEL_VERSION(5, 11, 0)/KERNEL_VERSION(5, 10, 0)/g' "$f"
             sed -i 's/ksys_close/close_fd/g' "$f"
             grep -q "extern int close_fd" "$f" || printf "\nextern int close_fd(unsigned int fd);\n" >> "$f"
+          done
+
+          # Also ensure KernelSU Kbuild defines __nocfi
+          find drivers/kernelsu/ KernelSU/ -name "Kbuild" 2>/dev/null | while read -r f; do
+            echo "ccflags-y += -D__nocfi=" >> "$f"
           done
 
       - name: Apply Compiler Warnings and Frame Size Fixes
