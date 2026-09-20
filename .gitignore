@@ -15,3 +15,5 @@ tools/toolchain/
 sources/
 temp/
 tools/SukiSU-Ultra/
+builds/*.zip
+module.prop

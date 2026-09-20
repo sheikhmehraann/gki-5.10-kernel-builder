@@ -1,4 +1,4 @@
-name: Build GKI 5.10.270 Kernel (KSU & noSU)
+name: Build GKI 5.10.271 Kernel (KSU & noSU)
 
 on:
   workflow_dispatch:
@@ -49,15 +49,15 @@ jobs:
 
       - name: Fetch Android Common Kernel 5.10
         run: |
-          echo "[+] Cloning Android Common Kernel 5.10..."
-          git clone --depth 1 -b android12-5.10-stg-damon \
+          echo "[+] Cloning Android Common Kernel 5.10 (Rama's 271 branch with hiber.ko ABI fix)..."
+          git clone --depth 1 -b android12-5.10-brokenkmi \
             https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
 
-          # Set sublevel to 270 (Linux 5.10.270)
-          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
+          # Ensure sublevel is 271 and clean EXTRAVERSION (no -rc1)
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 271/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
-          echo "[+] Kernel sublevel set to 5.10.270"
+          echo "[+] Kernel sublevel set to 5.10.271"
 
       - name: Integrate SukiSU-Ultra (for KSU variant)
         if: matrix.variant == 'KSU'
@@ -91,7 +91,7 @@ jobs:
           cd kernel_src
           mkdir -p out
 
-          echo "-Mehraan-5.10.270-${{ matrix.variant }}" > .scmversion
+          echo "-Mehraan-5.10.271-${{ matrix.variant }}" > .scmversion
 
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
@@ -158,7 +158,7 @@ jobs:
           
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/AK3-GKI-5.10.270-Mehraan-${{ matrix.variant }}.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/AK3-GKI-5.10.271-Mehraan-${{ matrix.variant }}.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
       - name: Repack Stock boot.img
@@ -167,7 +167,7 @@ jobs:
             echo "[+] Repacking Stockimgs/boot.img with new kernel..."
             python3 tools/repack_boot.py Stockimgs/boot.img \
               kernel_src/out/arch/arm64/boot/Image \
-              "artifacts/boot-5.10.270-Mehraan-${{ matrix.variant }}.img"
+              "artifacts/boot-5.10.271-Mehraan-${{ matrix.variant }}.img"
           else
             echo "[-] No Stockimgs/boot.img found, skipping repack."
           fi
@@ -183,6 +183,6 @@ jobs:
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-5.10.270-Kernel-By-Mehraan-${{ matrix.variant }}
+          name: GKI-5.10.271-Kernel-By-Mehraan-${{ matrix.variant }}
           path: artifacts/*
           if-no-files-found: error
