@@ -90,11 +90,14 @@ jobs:
             LLVM=1 LLVM_IAS=1 \
             gki_defconfig
 
-          # Enable KSU, OverlayFS, Kprobes, and DAMON
+          # Switch Full LTO to ThinLTO (Full LTO takes 2+ hours on CI runners)
+          # Enable KSU, OverlayFS, Kprobes, DAMON; disable WERROR
           scripts/config --file out/.config \
+            -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
             -e KSU -e OVERLAY_FS \
             -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS \
             -e DAMON \
+            -d WERROR \
             --set-val CONFIG_FRAME_WARN 4096
 
           make O=out ARCH=arm64 SUBARCH=arm64 \
