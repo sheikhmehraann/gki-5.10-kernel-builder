@@ -58,9 +58,10 @@ jobs:
           # DO NOT merge upstream v5.10.270 — it destroys Android-specific code
           # (CFI macros, security_inode_init_security_anon, vendor hooks, etc.)
           # Instead, just bump the sublevel in the Makefile for versioning.
-          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' Makefile)
-          echo "[+] Current kernel sublevel: 5.10.$SUBLEVEL"
+          # Set version to 5.10.270
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
+          echo "[+] Kernel sublevel set to 5.10.270"
 
       - name: Integrate KernelSU
         run: |
@@ -80,8 +81,7 @@ jobs:
           cd kernel_src
           mkdir -p out
 
-          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' Makefile)
-          echo "-Rama982-5.10.${SUBLEVEL}-KSU" > .scmversion
+          echo "-Mehraan-5.10.270-KSU" > .scmversion
 
           make O=out ARCH=arm64 SUBARCH=arm64 \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
@@ -121,26 +121,24 @@ jobs:
 
       - name: Package AnyKernel3 Zip
         run: |
-          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' kernel_src/Makefile)
           mkdir -p artifacts
-          if [ ! -f "tools/AnyKernel3/anykernel.sh" ]; then
-            echo "[+] Cloning AnyKernel3..."
-            rm -rf tools/AnyKernel3
-            git clone https://github.com/ramabondanp/AnyKernel3.git tools/AnyKernel3
-          fi
+          # Ensure anykernel.sh has Kernel By Mehraan and correct slot/block config
+          sed -i 's/kernel.string=.*/kernel.string=Kernel By Mehraan/' tools/AnyKernel3/anykernel.sh
+          sed -i 's#block=.*#block=boot;#' tools/AnyKernel3/anykernel.sh
+          sed -i 's/is_slot_device=.*/is_slot_device=auto;/' tools/AnyKernel3/anykernel.sh
+          
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/AK3-GKI-5.10.${SUBLEVEL}-KSU.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/AK3-GKI-5.10.270-KSU.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
       - name: Repack Stock boot.img
         run: |
-          SUBLEVEL=$(grep -oP '^SUBLEVEL = \K\d+' kernel_src/Makefile)
           if [ -f "Stockimgs/boot.img" ]; then
             echo "[+] Repacking Stockimgs/boot.img with new kernel..."
             python3 tools/repack_boot.py Stockimgs/boot.img \
               kernel_src/out/arch/arm64/boot/Image \
-              "artifacts/boot-5.10.${SUBLEVEL}-KSU.img"
+              "artifacts/boot-5.10.270-KSU.img"
           else
             echo "[-] No Stockimgs/boot.img found, skipping repack."
           fi
