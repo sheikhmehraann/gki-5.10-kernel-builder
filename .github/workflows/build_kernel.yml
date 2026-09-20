@@ -37,14 +37,11 @@ jobs:
             curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Setup LLVM / Clang Toolchain
+      - name: Setup LLVM Toolchain (Kernel.org 23.1.0-rc3)
         run: |
           mkdir -p toolchain
-          echo "[+] Downloading LLVM 17 toolchain..."
-          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1 || {
-            echo "[!] LLVM 17 not found, trying LLVM 18..."
-            curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-18.1.8-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
-          }
+          echo "[+] Downloading LLVM 23.1.0-rc3 (official fast toolchain used by Rama)..."
+          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-rc3-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
 
       - name: Fetch Android Common Kernel 5.10
@@ -93,19 +90,18 @@ jobs:
 
           echo "-Mehraan-5.10.271-${{ matrix.variant }}" > .scmversion
 
-          make O=out ARCH=arm64 SUBARCH=arm64 \
-            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
-            CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=1 LLVM_IAS=1 \
-            gki_defconfig
+          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
+          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LTO=thin
 
-          # Common config: ThinLTO for fast CI builds, DAMON, disable WERROR
+          make O=out gki_defconfig
+
+          # Common config: ThinLTO for fast CI builds, DAMON, skip CFI check, disable WERROR
           scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
             -e DAMON \
+            -e CFI_FORCE_SKIP_CHECK \
             -d WERROR \
-            --set-val CONFIG_FRAME_WARN 4096
+            --set-val CONFIG_FRAME_WARN 2048
 
           if [ "${{ matrix.variant }}" = "KSU" ]; then
             echo "[+] Configuring with SukiSU-Ultra root support..."
@@ -118,24 +114,14 @@ jobs:
               -d KSU -d OVERLAY_FS
           fi
 
-          make O=out ARCH=arm64 SUBARCH=arm64 \
-            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
-            CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=1 LLVM_IAS=1 \
-            olddefconfig
+          make O=out olddefconfig savedefconfig
 
       - name: Compile Kernel (Image)
         run: |
           cd kernel_src
-          make -j$(nproc --all) O=out \
-            ARCH=arm64 SUBARCH=arm64 \
-            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip \
-            CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
-            LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-error" \
-            Image
+          export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
+          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="-Mehraan-5.10.271-${{ matrix.variant }}" LTO=thin
+          make -j$(nproc --all) O=out Image
 
       - name: Package AnyKernel3 Zip
         run: |
