@@ -56,12 +56,18 @@ jobs:
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
           echo "[+] Kernel sublevel locked to 5.10.270"
 
-      - name: Integrate SukiSU-Ultra (Suki-Kernel only)
+      - name: Integrate SukiSU-Ultra & SuSFS (Suki-Kernel only)
         if: matrix.variant == 'Suki-Kernel'
         run: |
           cd kernel_src
-          echo "[+] Shallow cloning SukiSU-Ultra v4.2.0 for maximum build speed..."
+          echo "[+] Shallow cloning SukiSU-Ultra v4.2.0..."
           git clone --depth 1 --single-branch -b v4.2.0 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
+
+          echo "[+] Fetching SuSFS for GKI 5.10 (simonpunk/susfs4ksu)..."
+          git clone --depth 1 --single-branch -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git susfs
+
+          echo "[+] Applying SuSFS patch to KernelSU..."
+          (cd KernelSU && patch -p1 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch)
 
           echo "[+] Running upstream setup.sh to configure build system hooks..."
           bash KernelSU/kernel/setup.sh v4.2.0
@@ -76,7 +82,29 @@ jobs:
           sed -i 's/^KSU_VERSION\s*:=.*/KSU_VERSION     := 40900/' KernelSU/kernel/Kbuild
           sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-Mehraan-SukiSU/' KernelSU/kernel/Kbuild
 
-          echo "[+] SukiSU-Ultra v4.2.0 integrated (pure upstream, zero custom patches)"
+          echo "[+] Copying SuSFS kernel files..."
+          cp -vf susfs/kernel_patches/fs/susfs.c fs/
+          cp -vf susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp -vf susfs/kernel_patches/include/linux/susfs_def.h include/linux/
+
+          echo "[+] Applying SuSFS 5.10 kernel patch..."
+          patch -p1 < susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
+
+          # VMA_PAD_START fallback in task_mmu.c if not defined
+          if grep -q 'VMA_PAD_START(' fs/proc/task_mmu.c && ! grep -qE '#include <linux/pgsize_migration(_inline)?\.h>|define VMA_PAD_START' fs/proc/task_mmu.c; then
+            sed -i '1a #ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif' fs/proc/task_mmu.c
+            echo "[+] Added VMA_PAD_START fallback to task_mmu.c"
+          fi
+
+          echo "[+] Applying stealth abstract socket and cmdline spoofing patches..."
+          patch -p1 < ../patches/01_stealth_af_unix.patch
+          patch -p1 < ../patches/02_stealth_cmdline.patch
+
+          echo "[+] Building ksu_module_susfs.zip..."
+          mkdir -p ../artifacts
+          (cd susfs/ksu_module_susfs && zip -r9 ../../artifacts/ksu_module_susfs.zip * -x "*.zip")
+
+          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS stealth engine integrated successfully"
 
       - name: Configure Kernel
         run: |
@@ -126,16 +154,26 @@ jobs:
             -e BPF_SYSCALL -e BPF_JIT \
             -e MODULES -e MODULE_UNLOAD -e MODVERSIONS
 
-          # 7. Variant Specific (Suki-Kernel with SukiSU-Ultra & KPM Module Engine)
+          # 7. Variant Specific (Suki-Kernel with SukiSU-Ultra, KPM, and Full SuSFS Stealth Engine)
           if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
-            echo "[+] Enabling SukiSU-Ultra root support & KPM kernelpatch engine..."
+            echo "[+] Enabling SukiSU-Ultra root support, KPM kernelpatch engine, and SuSFS..."
             scripts/config --file out/.config \
               -e KSU \
-              -e KPM
+              -e KPM \
+              -e KSU_SUSFS \
+              -e KSU_SUSFS_SUS_PATH \
+              -e KSU_SUSFS_SUS_MOUNT \
+              -e KSU_SUSFS_SUS_KSTAT \
+              -e KSU_SUSFS_SPOOF_UNAME \
+              -e KSU_SUSFS_ENABLE_LOG \
+              -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+              -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+              -e KSU_SUSFS_OPEN_REDIRECT \
+              -e KSU_SUSFS_SUS_MAP
           else
-            echo "[+] Configuring NoSU (pure stock, NO root)..."
+            echo "[+] Configuring NoSU (pure stock, NO root, NO susfs)..."
             scripts/config --file out/.config \
-              -d KSU -d KPM
+              -d KSU -d KPM -d KSU_SUSFS
           fi
 
           make O=out olddefconfig savedefconfig
