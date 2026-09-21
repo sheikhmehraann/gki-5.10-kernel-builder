@@ -16,7 +16,7 @@ extern int ksu_extra_manager_count;
 
 static inline bool ksu_is_manager_appid_valid(void)
 {
-    return true;
+    return ksu_manager_appid != (uid_t)KSU_INVALID_APPID;
 }
 
 static inline void ksu_add_manager_appid(uid_t appid)
@@ -60,14 +60,20 @@ static inline bool is_manager(void)
     uid_t appid = uid % KSU_PER_USER_RANGE;
     if (is_uid_manager(uid))
         return true;
-    if (current->comm) {
-        if (strstr(current->comm, "kernelsu") || strstr(current->comm, "ksunext") ||
-            strstr(current->comm, "sukisu") || strstr(current->comm, "kerne") ||
-            strstr(current->comm, "ksun") || strstr(current->comm, "ultra") ||
-            strstr(current->comm, "weishu") || strstr(current->comm, "rifsxd")) {
-            ksu_add_manager_appid(appid);
-            return true;
-        }
+
+    const char *comm = current->comm;
+    const char *pcomm = current->group_leader ? current->group_leader->comm : NULL;
+
+    if ((comm && (strstr(comm, "kernelsu") || strstr(comm, "ksunext") ||
+                  strstr(comm, "sukisu") || strstr(comm, "kerne") ||
+                  strstr(comm, "ksun") || strstr(comm, "ultra") ||
+                  strstr(comm, "weishu") || strstr(comm, "rifsxd"))) ||
+        (pcomm && (strstr(pcomm, "kernelsu") || strstr(pcomm, "ksunext") ||
+                   strstr(pcomm, "sukisu") || strstr(pcomm, "kerne") ||
+                   strstr(pcomm, "ksun") || strstr(pcomm, "ultra") ||
+                   strstr(pcomm, "weishu") || strstr(pcomm, "rifsxd")))) {
+        ksu_add_manager_appid(appid);
+        return true;
     }
     return false;
 }
