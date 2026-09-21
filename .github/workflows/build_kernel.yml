@@ -84,6 +84,9 @@ jobs:
           cp -vf susfs/kernel_patches/include/linux/susfs.h include/linux/
           cp -vf susfs/kernel_patches/include/linux/susfs_def.h include/linux/
 
+          # Provide ksu_handle_post_execveat_sucompat symbol required by fs/exec.c
+          echo -e "\nint ksu_handle_post_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv_user, void *envp_user, int *__never_use_flags, int *retval) { return 0; }" >> fs/susfs.c
+
           echo "[+] Applying SuSFS 5.10 kernel patch..."
           patch -p1 < susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
 
