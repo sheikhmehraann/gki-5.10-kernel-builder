@@ -1,4 +1,4 @@
-name: Build GKI 5.10.270 Kernel (KSU & noSU)
+name: Build Suki-Kernel & NoSU-Kernel (5.10.270)
 
 on:
   workflow_dispatch:
@@ -8,12 +8,12 @@ on:
 
 jobs:
   build:
-    name: Build Kernel (${{ matrix.variant }})
+    name: Build ${{ matrix.variant }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        variant: [KSU, noSU]
+        variant: [Suki-Kernel, NoSU-Kernel]
 
     steps:
       - name: Maximize Build Space
@@ -40,62 +40,66 @@ jobs:
       - name: Setup LLVM Toolchain (Kernel.org 17.0.6)
         run: |
           mkdir -p toolchain
-          echo "[+] Downloading LLVM 17.0.6 (the exact compiler that boots flawlessly without MKP mismatch)..."
+          echo "[+] Downloading LLVM 17.0.6 (proven MKP-safe compiler)..."
           curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
 
       - name: Fetch Android Common Kernel 5.10
         run: |
-          echo "[+] Cloning Android Common Kernel 5.10 (proven android12-5.10-stg-damon branch)..."
+          echo "[+] Cloning Android Common Kernel 5.10 (stg-damon branch, MKP-safe)..."
           git clone --depth 1 -b android12-5.10-stg-damon \
             https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
 
-          # Set sublevel to 270 and clean EXTRAVERSION
+          # Lock sublevel to 270 — 271 is impossible (MKP struct mismatch on all builds)
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
-          echo "[+] Kernel sublevel set to 5.10.270"
+          echo "[+] Kernel sublevel locked to 5.10.270"
 
-      - name: Integrate SukiSU-Ultra (for KSU variant)
-        if: matrix.variant == 'KSU'
+      - name: Integrate SukiSU-Ultra (Suki-Kernel only)
+        if: matrix.variant == 'Suki-Kernel'
         run: |
           cd kernel_src
-          echo "[+] Setting up SukiSU-Ultra (supports KSU Latest, KSU-Next, SukiSU Ultra)..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          echo "[+] Setting up SukiSU-Ultra (upstream, no custom patches)..."
 
-          # Ensure driver entries exist
-          grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
-          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          # Use upstream setup.sh — clones repo, creates symlink, hooks build system
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.2.0
 
-          # Ensure driver version is 40900 (UAPI v2) for full compatibility with all latest managers
-          find drivers/kernelsu/ KernelSU/ -name "Kbuild" 2>/dev/null | while read -r f; do
-            echo "ccflags-y += -DKSU_VERSION=40900 -DKSU_VERSION_FULL=\\\"v4.2.0-Mehraan-Ultra\\\"" >> "$f"
+          # Verify integration
+          echo "[+] Verifying SukiSU integration..."
+          ls -la drivers/kernelsu/ || { echo "ERROR: symlink not created"; exit 1; }
+          grep -q "kernelsu" drivers/Makefile || { echo "ERROR: Makefile not patched"; exit 1; }
+          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || { echo "ERROR: Kconfig not patched"; exit 1; }
+
+          # Force version to match manager v4.2.0 (build 40900)
+          # This ensures the manager recognizes the kernel as compatible
+          find KernelSU/kernel/ -name "Kbuild" -o -name "Makefile" 2>/dev/null | while read -r f; do
+            if grep -q "KSU_VERSION" "$f"; then
+              echo "ccflags-y += -DKSU_VERSION=40900" >> "$f"
+              echo "ccflags-y += -DKSU_VERSION_FULL=\\\"v4.2.0-Mehraan-SukiSU\\\"" >> "$f"
+              echo "[+] Patched version in $f"
+            fi
           done
 
-          # Apply Universal Multi-Manager Support (Official KSU, KSU-Next, SukiSU Ultra)
-          echo "[+] Applying Universal Multi-Manager patches..."
-          cp -vf ../patches/manager_identity.h KernelSU/kernel/manager/manager_identity.h
-          cp -vf ../patches/apk_sign.c KernelSU/kernel/manager/apk_sign.c
-          cp -vf ../patches/throne_tracker.c KernelSU/kernel/manager/throne_tracker.c
-          cp -vf ../patches/allowlist.c KernelSU/kernel/policy/allowlist.c
-          cp -vf ../patches/dispatch.c KernelSU/kernel/supercall/dispatch.c
-          cp -vf ../patches/supercall.h KernelSU/uapi/supercall.h
-
-          echo "[+] SukiSU-Ultra integrated and patched for all managers."
+          echo "[+] SukiSU-Ultra v4.2.0 integrated (pure upstream, zero custom patches)"
 
       - name: Configure Kernel
         run: |
           cd kernel_src
           mkdir -p out
 
-          echo "-Mehraan-5.10.270-${{ matrix.variant }}" > .scmversion
+          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
+            echo "-Mehraan-Suki" > .scmversion
+          else
+            echo "-Mehraan-NoSU" > .scmversion
+          fi
 
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LTO=thin
 
           make O=out gki_defconfig
 
-          # Common config: ThinLTO for fast CI builds, DAMON, skip CFI check, disable WERROR
+          # Common: ThinLTO, DAMON, skip CFI check, OverlayFS, no WERROR
           scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
             -e DAMON \
@@ -104,13 +108,13 @@ jobs:
             -e OVERLAY_FS -e OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW \
             --set-val CONFIG_FRAME_WARN 2048
 
-          if [ "${{ matrix.variant }}" = "KSU" ]; then
-            echo "[+] Configuring with SukiSU-Ultra root support..."
+          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
+            echo "[+] Enabling SukiSU-Ultra root support..."
             scripts/config --file out/.config \
               -e KSU \
               -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS
           else
-            echo "[+] Configuring noSU (pure stock kernel, NO ROOT)..."
+            echo "[+] Configuring NoSU (pure stock, NO root)..."
             scripts/config --file out/.config \
               -d KSU
           fi
@@ -121,55 +125,62 @@ jobs:
         run: |
           cd kernel_src
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
-          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="-Mehraan-5.10.270-${{ matrix.variant }}" LTO=thin
+
+          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
+            LOCALVER="-Mehraan-Suki"
+          else
+            LOCALVER="-Mehraan-NoSU"
+          fi
+
+          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="$LOCALVER" LTO=thin
           make -j$(nproc --all) O=out Image
 
       - name: Package AnyKernel3 Zip
         run: |
           mkdir -p artifacts
-          
-          # Ensure fresh upstream AnyKernel3 template
+
+          # Fresh upstream AnyKernel3
           rm -rf tools/AnyKernel3
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git tools/AnyKernel3
 
-          # Use clean universal GKI AnyKernel3 template
+          # Apply template with variant name
           cp -vf tools/anykernel_template.sh tools/AnyKernel3/anykernel.sh
           sed -i "s/VARIANT/${{ matrix.variant }}/" tools/AnyKernel3/anykernel.sh
           rm -rf tools/AnyKernel3/ramdisk/overlay.d
-          
-          # Use modern Header v4-compatible magiskboot
+
+          # Use Header v4-compatible magiskboot
           if [ -f "tools/magiskboot_arm64" ]; then
             cp -vf tools/magiskboot_arm64 tools/AnyKernel3/tools/magiskboot
             chmod +x tools/AnyKernel3/tools/magiskboot
           fi
-          
+
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/AK3-GKI-5.10.270-Mehraan-${{ matrix.variant }}.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/${{ matrix.variant }}-5.10.270-Mehraan.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
       - name: Repack Stock boot.img
         run: |
           if [ -f "Stockimgs/boot.img" ]; then
-            echo "[+] Repacking Stockimgs/boot.img with new kernel..."
+            echo "[+] Repacking stock boot.img with new kernel..."
             python3 tools/repack_boot.py Stockimgs/boot.img \
               kernel_src/out/arch/arm64/boot/Image \
-              "artifacts/boot-5.10.270-Mehraan-${{ matrix.variant }}.img"
+              "artifacts/${{ matrix.variant }}-5.10.270-boot.img"
           else
             echo "[-] No Stockimgs/boot.img found, skipping repack."
           fi
 
-      - name: Include Latest Root Managers in Artifacts (for KSU variant)
-        if: matrix.variant == 'KSU'
+      - name: Include SukiSU Ultra Manager (Suki-Kernel only)
+        if: matrix.variant == 'Suki-Kernel'
         run: |
           if [ -d "managers" ]; then
-            echo "[+] Copying latest Root Managers to artifacts..."
-            cp -vf managers/*.apk artifacts/
+            echo "[+] Copying SukiSU Ultra Manager to artifacts..."
+            cp -vf managers/SukiSU_Ultra_*.apk artifacts/
           fi
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-5.10.270-Kernel-By-Mehraan-${{ matrix.variant }}
+          name: ${{ matrix.variant }}-5.10.270-by-Mehraan
           path: artifacts/*
           if-no-files-found: error
