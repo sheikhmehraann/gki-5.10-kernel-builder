@@ -71,15 +71,9 @@ jobs:
           grep -q "kernelsu" drivers/Makefile || { echo "ERROR: Makefile not patched"; exit 1; }
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || { echo "ERROR: Kconfig not patched"; exit 1; }
 
-          # Force version to match manager v4.2.0 (build 40900)
-          # This ensures the manager recognizes the kernel as compatible
-          find KernelSU/kernel/ -name "Kbuild" -o -name "Makefile" 2>/dev/null | while read -r f; do
-            if grep -q "KSU_VERSION" "$f"; then
-              echo "ccflags-y += -DKSU_VERSION=40900" >> "$f"
-              echo "ccflags-y += -DKSU_VERSION_FULL=\\\"v4.2.0-Mehraan-SukiSU\\\"" >> "$f"
-              echo "[+] Patched version in $f"
-            fi
-          done
+          # Lock version cleanly to 40900 to match manager v4.2.0
+          sed -i 's/^KSU_VERSION\s*:=.*/KSU_VERSION     := 40900/' KernelSU/kernel/Kbuild
+          sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-Mehraan-SukiSU/' KernelSU/kernel/Kbuild
 
           echo "[+] SukiSU-Ultra v4.2.0 integrated (pure upstream, zero custom patches)"
 
