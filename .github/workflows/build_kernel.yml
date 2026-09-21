@@ -140,8 +140,8 @@ jobs:
           '
 
           echo "[+] Building ksu_module_susfs.zip..."
-          mkdir -p ../artifacts
-          (cd susfs/ksu_module_susfs && zip -r9 ../../artifacts/ksu_module_susfs.zip * -x "*.zip")
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts"
+          (cd susfs/ksu_module_susfs && zip -r9 "${GITHUB_WORKSPACE}/artifacts/ksu_module_susfs.zip" * -x "*.zip")
 
           echo "[+] SukiSU-Ultra v4.2.0 & SuSFS stealth engine integrated successfully"
 
