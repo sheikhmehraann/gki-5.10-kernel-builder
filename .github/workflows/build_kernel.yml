@@ -60,17 +60,11 @@ jobs:
         if: matrix.variant == 'Suki-Kernel'
         run: |
           cd kernel_src
-          echo "[+] Shallow cloning SukiSU-Ultra v4.2.0..."
-          git clone --depth 1 --single-branch -b v4.2.0 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
-
-          echo "[+] Fetching SuSFS for GKI 5.10 (simonpunk/susfs4ksu)..."
-          git clone --depth 1 --single-branch -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git susfs
-
-          echo "[+] Applying SuSFS patch to KernelSU..."
-          (cd KernelSU && patch -p1 < ../susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch)
+          echo "[+] Shallow cloning SukiSU-Ultra (builtin branch with pre-integrated SuSFS)..."
+          git clone --depth 1 --single-branch -b builtin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
 
           echo "[+] Running upstream setup.sh to configure build system hooks..."
-          bash KernelSU/kernel/setup.sh v4.2.0
+          bash KernelSU/kernel/setup.sh builtin
 
           # Verify integration
           echo "[+] Verifying SukiSU integration..."
@@ -79,8 +73,11 @@ jobs:
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || { echo "ERROR: Kconfig not patched"; exit 1; }
 
           # Lock version cleanly to 40900 to match manager v4.2.0
-          sed -i 's/^KSU_VERSION\s*:=.*/KSU_VERSION     := 40900/' KernelSU/kernel/Kbuild
-          sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-Mehraan-SukiSU/' KernelSU/kernel/Kbuild
+          sed -i 's/^KSU_VERSION\s*:=.*/KSU_VERSION     := 40900/' KernelSU/kernel/Makefile 2>/dev/null || true
+          sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-Mehraan-SukiSU/' KernelSU/kernel/Makefile 2>/dev/null || true
+
+          echo "[+] Fetching SuSFS for GKI 5.10 (simonpunk/susfs4ksu)..."
+          git clone --depth 1 --single-branch -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git susfs
 
           echo "[+] Copying SuSFS kernel files..."
           cp -vf susfs/kernel_patches/fs/susfs.c fs/
