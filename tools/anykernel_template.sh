@@ -4,7 +4,7 @@
 ### AnyKernel setup
 # Global properties
 properties() { '
-kernel.string=Kernel By Mehraan (VARIANT)
+kernel.string=VARIANT 5.10.270 by Mehraan
 do.devicecheck=0
 do.modules=0
 do.systemless=1

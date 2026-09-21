@@ -83,35 +83,59 @@ jobs:
           cd kernel_src
           mkdir -p out
 
-          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
-            echo "-Mehraan-Suki" > .scmversion
-          else
-            echo "-Mehraan-NoSU" > .scmversion
-          fi
+          # Proper naming: Clean version string with zero duplication
+          rm -f .scmversion
 
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LTO=thin
 
           make O=out gki_defconfig
 
-          # Common: ThinLTO, DAMON, skip CFI check, OverlayFS, no WERROR
+          # 1. Performance & Compiler Optimizations (ThinLTO, skip runtime CFI overhead on hot paths)
           scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
-            -e DAMON \
             -e CFI_FORCE_SKIP_CHECK \
             -d WERROR \
             -e OVERLAY_FS -e OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW \
             --set-val CONFIG_FRAME_WARN 2048
 
+          # 2. Battery Backup & Less Heat (Energy-Aware Scheduling, low-power idle sleep)
+          scripts/config --file out/.config \
+            -e ENERGY_MODEL \
+            -e NO_HZ -e RCU_FAST_NO_HZ
+
+          # 3. Peak Internet (Google BBR TCP Congestion Control as default for lowest latency & highest bandwidth)
+          scripts/config --file out/.config \
+            -e TCP_CONG_ADVANCED -e TCP_CONG_BBR -e DEFAULT_BBR \
+            --set-str CONFIG_DEFAULT_TCP_CONG "bbr" \
+            -e NETFILTER_XT_TARGET_TPROXY -e NETFILTER_XT_TARGET_DSCP
+
+          # 4. Better RAM Management (Full DAMON Proactive Cold Page Reclaim)
+          scripts/config --file out/.config \
+            -e DAMON -e DAMON_PADDR -e DAMON_SYSFS -e DAMON_RECLAIM
+
+          # 5. Peak I/O Performance & Dynamic Governors
+          scripts/config --file out/.config \
+            -e MQ_IOSCHED_ADIOS \
+            -e IOSCHED_BFQ -e BFQ_GROUP_IOSCHED \
+            -e CPU_FREQ_GOV_REFLEX -e CPU_FREQ_GOV_SCHEDHORIZON
+
+          # 6. Full Kernel Modding Access (Kprobes, eBPF, and Runtime Loadable Kernel Modules)
+          scripts/config --file out/.config \
+            -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS \
+            -e BPF_SYSCALL -e BPF_JIT \
+            -e MODULES -e MODULE_UNLOAD -e MODVERSIONS
+
+          # 7. Variant Specific (Suki-Kernel with SukiSU-Ultra & KPM Module Engine)
           if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
-            echo "[+] Enabling SukiSU-Ultra root support..."
+            echo "[+] Enabling SukiSU-Ultra root support & KPM kernelpatch engine..."
             scripts/config --file out/.config \
               -e KSU \
-              -e KPROBES -e HAVE_KPROBES -e KPROBE_EVENTS
+              -e KPM
           else
             echo "[+] Configuring NoSU (pure stock, NO root)..."
             scripts/config --file out/.config \
-              -d KSU
+              -d KSU -d KPM
           fi
 
           make O=out olddefconfig savedefconfig
@@ -121,11 +145,8 @@ jobs:
           cd kernel_src
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
 
-          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
-            LOCALVER="-Mehraan-Suki"
-          else
-            LOCALVER="-Mehraan-NoSU"
-          fi
+          # Clean naming: 5.10.270-Mehraan-Suki-Kernel or 5.10.270-Mehraan-NoSU-Kernel
+          LOCALVER="-Mehraan-${{ matrix.variant }}"
 
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="$LOCALVER" LTO=thin
           make -j$(nproc --all) O=out Image
