@@ -93,9 +93,51 @@ jobs:
             echo "[+] Added VMA_PAD_START fallback to task_mmu.c"
           fi
 
-          echo "[+] Applying stealth abstract socket and cmdline spoofing patches..."
-          patch -p1 < ../patches/01_stealth_af_unix.patch
-          patch -p1 < ../patches/02_stealth_cmdline.patch
+          echo "[+] Applying stealth abstract socket filtering to net/unix/af_unix.c..."
+          python3 -c '
+          c = open("net/unix/af_unix.c").read()
+          target = "struct unix_sock *u = unix_sk(s);"
+          stealth = """struct unix_sock *u = unix_sk(s);
+          #ifdef CONFIG_KSU_SUSFS
+          \tif (current_uid().val >= 10000 && u->addr && UNIX_ABSTRACT(s)) {
+          \t\tint path_len = u->addr->len - sizeof(short);
+          \t\tif (path_len >= 32) return 0;
+          \t}
+          #endif"""
+          assert target in c, "target not found in net/unix/af_unix.c"
+          open("net/unix/af_unix.c", "w").write(c.replace(target, stealth, 1))
+          '
+
+          echo "[+] Applying boot state spoofing to fs/proc/cmdline.c..."
+          python3 -c '
+          c = open("fs/proc/cmdline.c").read()
+          header = """#ifdef CONFIG_KSU_SUSFS
+          #include <linux/cred.h>
+          #include <linux/string.h>
+          #include <linux/slab.h>
+          #endif
+          """
+          target = "static int cmdline_proc_show(struct seq_file *m, void *v)\n{"
+          stealth = """static int cmdline_proc_show(struct seq_file *m, void *v)
+          {
+          #ifdef CONFIG_KSU_SUSFS
+          \tif (current_uid().val >= 10000) {
+          \t\tchar *buf = kstrdup(saved_command_line, GFP_KERNEL);
+          \t\tif (buf) {
+          \t\t\tchar *p;
+          \t\t\tif ((p = strstr(buf, "androidboot.verifiedbootstate=orange"))) memcpy(p + 30, "green ", 6);
+          \t\t\tif ((p = strstr(buf, "androidboot.flash.locked=0"))) p[25] = "1"[0];
+          \t\t\tif ((p = strstr(buf, "androidboot.vbmeta.device_state=unlocked"))) memcpy(p + 32, "locked  ", 8);
+          \t\t\tseq_puts(m, buf);
+          \t\t\tkfree(buf);
+          \t\t\tseq_putc(m, '\''\\n'\'');
+          \t\t\treturn 0;
+          \t\t}
+          \t}
+          #endif"""
+          assert target in c, "target not found in fs/proc/cmdline.c"
+          open("fs/proc/cmdline.c", "w").write(header + c.replace(target, stealth, 1))
+          '
 
           echo "[+] Building ksu_module_susfs.zip..."
           mkdir -p ../artifacts
