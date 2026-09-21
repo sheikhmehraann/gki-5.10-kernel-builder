@@ -304,24 +304,21 @@ void track_throne(bool prune_only)
     struct uid_data *np;
     struct uid_data *n;
 
-    if (prune_only)
-        goto prune;
-
-    // first, check if manager_uid exist!
-    bool manager_exist = false;
+    // Crown all known managers found in packages.list directly!
     list_for_each_entry (np, &uid_list, list) {
-        if (np->uid == ksu_get_manager_appid()) {
-            manager_exist = true;
-            break;
+        if (strncmp(np->package, "me.weishu.kernelsu", KSU_MAX_PACKAGE_NAME) == 0 ||
+            strncmp(np->package, "com.sukisu.ultra", KSU_MAX_PACKAGE_NAME) == 0 ||
+            strncmp(np->package, "com.rifsxd.ksunext", KSU_MAX_PACKAGE_NAME) == 0) {
+            pr_info("Crowning manager from packages.list: %s (uid=%d)\n", np->package, np->uid);
+            ksu_add_manager_appid(np->uid);
         }
     }
 
-    if (!manager_exist) {
-        if (ksu_is_manager_appid_valid()) {
-            pr_info("manager is uninstalled, invalidate it!\n");
-            ksu_invalidate_manager_uid();
-            goto prune;
-        }
+    if (prune_only)
+        goto prune;
+
+    // Also fallback to search_manager if no manager was found yet
+    if (!ksu_is_manager_appid_valid()) {
         pr_info("Searching manager...\n");
         search_manager("/data/app", 2, &uid_list);
         pr_info("Search manager finished\n");
