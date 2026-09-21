@@ -41,13 +41,13 @@ jobs:
         run: |
           mkdir -p toolchain
           echo "[+] Downloading LLVM 17.0.6 (proven MKP-safe compiler)..."
-          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
+          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -I "xz -T0" -xf - -C toolchain --strip-components=1
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
 
       - name: Fetch Android Common Kernel 5.10
         run: |
           echo "[+] Cloning Android Common Kernel 5.10 (stg-damon branch, MKP-safe)..."
-          git clone --depth 1 -b android12-5.10-stg-damon \
+          git clone --depth 1 --single-branch --no-tags -b android12-5.10-stg-damon \
             https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
 
@@ -60,10 +60,11 @@ jobs:
         if: matrix.variant == 'Suki-Kernel'
         run: |
           cd kernel_src
-          echo "[+] Setting up SukiSU-Ultra (upstream, no custom patches)..."
+          echo "[+] Shallow cloning SukiSU-Ultra v4.2.0 for maximum build speed..."
+          git clone --depth 1 --single-branch -b v4.2.0 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
 
-          # Use upstream setup.sh — clones repo, creates symlink, hooks build system
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.2.0
+          echo "[+] Running upstream setup.sh to configure build system hooks..."
+          bash KernelSU/kernel/setup.sh v4.2.0
 
           # Verify integration
           echo "[+] Verifying SukiSU integration..."
