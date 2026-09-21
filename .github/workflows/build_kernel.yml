@@ -1,4 +1,4 @@
-name: Build GKI 5.10.271 Kernel (KSU & noSU)
+name: Build GKI 5.10.270 Kernel (KSU & noSU)
 
 on:
   workflow_dispatch:
@@ -37,23 +37,24 @@ jobs:
             curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Setup LLVM Toolchain (Kernel.org 23.1.0-rc3)
+      - name: Setup LLVM Toolchain (Kernel.org 17.0.6)
         run: |
           mkdir -p toolchain
-          echo "[+] Downloading LLVM 23.1.0-rc3 (official fast toolchain used by Rama)..."
-          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.0-rc3-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
+          echo "[+] Downloading LLVM 17.0.6 (the exact compiler that boots flawlessly without MKP mismatch)..."
+          curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -xJf - -C toolchain --strip-components=1
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
 
       - name: Fetch Android Common Kernel 5.10
         run: |
-          echo "[+] Cloning Android Common Kernel 5.10 (staging branch — clean KMI, sublevel 271)..."
-          git clone --depth 1 -b android12-5.10-staging \
+          echo "[+] Cloning Android Common Kernel 5.10 (proven android12-5.10-stg-damon branch)..."
+          git clone --depth 1 -b android12-5.10-stg-damon \
             https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
 
-          # Staging branch already has SUBLEVEL=271 and EXTRAVERSION=-rc1
-          # Keep -rc1 to match vendor module expectations (MKP version validation)
-          echo "[+] Kernel version: $(head -5 Makefile | grep -E 'VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION')"
+          # Set sublevel to 270 and clean EXTRAVERSION
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
+          sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
+          echo "[+] Kernel sublevel set to 5.10.270"
 
       - name: Integrate SukiSU-Ultra (for KSU variant)
         if: matrix.variant == 'KSU'
@@ -87,7 +88,7 @@ jobs:
           cd kernel_src
           mkdir -p out
 
-          echo "-Mehraan-5.10.271-${{ matrix.variant }}" > .scmversion
+          echo "-Mehraan-5.10.270-${{ matrix.variant }}" > .scmversion
 
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LTO=thin
@@ -120,7 +121,7 @@ jobs:
         run: |
           cd kernel_src
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
-          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="-Mehraan-5.10.271-${{ matrix.variant }}" LTO=thin
+          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="-Mehraan-5.10.270-${{ matrix.variant }}" LTO=thin
           make -j$(nproc --all) O=out Image
 
       - name: Package AnyKernel3 Zip
@@ -144,7 +145,7 @@ jobs:
           
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/AK3-GKI-5.10.271-Mehraan-${{ matrix.variant }}.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/AK3-GKI-5.10.270-Mehraan-${{ matrix.variant }}.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
       - name: Repack Stock boot.img
@@ -153,7 +154,7 @@ jobs:
             echo "[+] Repacking Stockimgs/boot.img with new kernel..."
             python3 tools/repack_boot.py Stockimgs/boot.img \
               kernel_src/out/arch/arm64/boot/Image \
-              "artifacts/boot-5.10.271-Mehraan-${{ matrix.variant }}.img"
+              "artifacts/boot-5.10.270-Mehraan-${{ matrix.variant }}.img"
           else
             echo "[-] No Stockimgs/boot.img found, skipping repack."
           fi
@@ -169,6 +170,6 @@ jobs:
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-5.10.271-Kernel-By-Mehraan-${{ matrix.variant }}
+          name: GKI-5.10.270-Kernel-By-Mehraan-${{ matrix.variant }}
           path: artifacts/*
           if-no-files-found: error
