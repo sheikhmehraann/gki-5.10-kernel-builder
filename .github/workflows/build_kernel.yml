@@ -277,38 +277,11 @@ jobs:
           open("fs/proc/version.c", "w").write(c)
           '
 
-          # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 7: VFS Path Denial (fs/namei.c)                   [NEW]
-          # Returns -ENOENT for /data/adb/* and /debug_ramdisk/* when queried
-          # by unprivileged processes via faccessat2/newfstatat/statx.
-          # ═══════════════════════════════════════════════════════════════
-          echo "[+] Applying VFS path denial to fs/namei.c..."
-          python3 -c '
-          c = open("fs/namei.c").read()
-          target = "int filename_lookup(int dfd, struct filename *name, unsigned flags,"
-          idx = c.index(target)
-          brace_idx = c.index("{", idx + len(target))
-          check = """{
-          #ifdef CONFIG_KSU_SUSFS
-          \tif (name && name->name && current_uid().val >= 10000) {
-          \t\tconst char *p = name->name;
-          \t\tif (p[0] == \x27/\x27) {
-          \t\t\tif (__builtin_expect(strncmp(p, "/data/adb", 9) == 0 && (p[9] == \x27/\x27 || p[9] == \x27\x5c0\x27), 0))
-          \t\t\t\treturn -ENOENT;
-          \t\t\tif (__builtin_expect(strncmp(p, "/debug_ramdisk", 14) == 0 && (p[14] == \x27/\x27 || p[14] == \x27\x5c0\x27), 0))
-          \t\t\t\treturn -ENOENT;
-          \t\t}
-          \t}
-          #endif"""
-          c = c[:brace_idx] + check + c[brace_idx+1:]
-          open("fs/namei.c", "w").write(c)
-          '
-
           echo "[+] Building ksu_module_susfs.zip..."
           mkdir -p "${GITHUB_WORKSPACE}/artifacts"
           (cd susfs/ksu_module_susfs && zip -r9 "${GITHUB_WORKSPACE}/artifacts/ksu_module_susfs.zip" * -x "*.zip")
 
-          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS deep stealth engine integrated (7 kernel patches)"
+          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS deep stealth engine integrated (6 kernel patches)"
 
       - name: Configure Kernel
         run: |
