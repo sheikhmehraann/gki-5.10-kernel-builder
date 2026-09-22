@@ -1,7 +1,21 @@
-name: Build Suki-Kernel & NoSU-Kernel (5.10.270) — Deep Stealth
+name: Build Suki-Kernel & NoSU-Kernel (5.10.270) - Deep Stealth
 
-on:
+'on':
   workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Kernel Variant to build'
+        required: true
+        default: 'Suki-Kernel'
+        type: choice
+        options:
+          - Suki-Kernel
+          - NoSU-Kernel
+          - Both
+
+concurrency:
+  group: kernel-builder-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -10,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [Suki-Kernel, NoSU-Kernel]
+        variant: ${{ github.event.inputs.variant == 'Both' && fromJSON('["Suki-Kernel", "NoSU-Kernel"]') || (github.event.inputs.variant == 'NoSU-Kernel' && fromJSON('["NoSU-Kernel"]') || fromJSON('["Suki-Kernel"]')) }}
 
     steps:
       - name: Maximize Build Space
@@ -34,12 +48,31 @@ jobs:
             curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
+      - name: Cache LLVM Toolchain (Kernel.org 17.0.6)
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: toolchain
+          key: llvm-17.0.6-x86_64
+
       - name: Setup LLVM Toolchain (Kernel.org 17.0.6)
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           mkdir -p toolchain
           echo "[+] Downloading LLVM 17.0.6 (proven MKP-safe compiler)..."
           curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -I "xz -T0" -xf - -C toolchain --strip-components=1
+
+      - name: Add LLVM to PATH
+        run: |
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
+
+      - name: Setup Compiler Cache (ccache)
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ matrix.variant }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.variant }}-
 
       - name: Fetch Android Common Kernel 5.10
         run: |
@@ -368,8 +401,15 @@ jobs:
           cd kernel_src
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
 
+          # Configure ccache for fastest builds
+          export CCACHE_DIR=/home/runner/.ccache
+          export CCACHE_MAXSIZE=8G
+          export CCACHE_COMPRESS=1
+          export CCACHE_COMPRESSLEVEL=5
+          ccache -s -z
+
           # Native stock naming from CONFIG_LOCALVERSION
-          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="" LTO=thin
+          export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="" LTO=thin CCACHE=ccache
 
           # Build environment spoofing — stock OEM builder identity
           export KBUILD_BUILD_USER="build"
@@ -377,6 +417,9 @@ jobs:
           export KBUILD_BUILD_TIMESTAMP="Mon Jan  1 00:00:00 UTC 2026"
 
           make -j$(nproc --all) O=out Image
+
+          echo "[+] ccache statistics after build:"
+          ccache -s
 
       - name: Package AnyKernel3 Zip
         run: |
