@@ -1,6 +1,6 @@
 name: Build Suki-Kernel & NoSU-Kernel (5.10.270) - Deep Stealth
 
-on:
+'on':
   workflow_dispatch:
     inputs:
       variant:
