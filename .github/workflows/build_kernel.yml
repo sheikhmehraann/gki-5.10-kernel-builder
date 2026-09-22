@@ -114,19 +114,10 @@ jobs:
           cp -vf susfs/kernel_patches/include/linux/susfs.h include/linux/
           cp -vf susfs/kernel_patches/include/linux/susfs_def.h include/linux/
 
-          echo "[+] Patching susfs_def.h for universal app hiding (UID >= 10000)..."
-          python3 -c '
-          c = open("include/linux/susfs_def.h").read()
-          old = "return (likely(test_thread_flag(TIF_PROC_UMOUNTED)) &&\n\t\t\tcurrent_uid().val >= 10000);"
-          new = "return ((current_uid().val % 100000) >= 10000);"
-          assert old in c, "target check not found in susfs_def.h"
-          open("include/linux/susfs_def.h", "w").write(c.replace(old, new, 1))
-          '
-
           # Provide ksu_handle_post_execveat_sucompat symbol required by fs/exec.c
           echo -e "\nint ksu_handle_post_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv_user, void *envp_user, int *__never_use_flags, int *retval) { return 0; }" >> fs/susfs.c
 
-          echo "[+] Adding hardcoded default stealth paths to fs/susfs.c..."
+          echo "[+] Adding safe static default stealth paths to fs/susfs.c..."
           python3 -c '
           c = open("fs/susfs.c").read()
           helper = """#ifdef CONFIG_KSU_SUSFS_SUS_PATH
@@ -147,15 +138,7 @@ jobs:
           target = "void susfs_init(void) {"
           calls = """void susfs_init(void) {
           #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-          \tsusfs_add_default_path_loop("/sdcard/Fox");
-          \tsusfs_add_default_path_loop("/data/media/0/Fox");
-          \tsusfs_add_default_path_loop("/sdcard/MT2");
-          \tsusfs_add_default_path_loop("/data/media/0/MT2");
-          \tsusfs_add_default_path_loop("/sdcard/TWRP");
-          \tsusfs_add_default_path_loop("/data/media/0/TWRP");
-          \tsusfs_add_default_path_loop("/debug_ramdisk");
           \tsusfs_add_default_path_loop("/system/addon.d");
-          \tsusfs_add_default_path_loop("/sys/block/loop0");
           #endif"""
           assert target in c, "target not found in fs/susfs.c"
           c = c.replace(target, helper + "\n" + calls, 1)
@@ -172,29 +155,34 @@ jobs:
           fi
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 1: Abstract Unix Socket Filtering (net/unix/af_unix.c)
-          # Hides abstract sockets with name length >= 32 from /proc/net/unix
-          # for unprivileged processes. Root daemon sockets use long random names.
+          # STEALTH PATCH 1: Abstract Unix Socket seq_show Filtering (net/unix/af_unix.c)
+          # Hides long random-named abstract sockets from /proc/net/unix for UID >= 10000.
+          # CRITICAL: Hook ONLY unix_seq_show. Never touch __unix_find_socket_byname!
           # ═══════════════════════════════════════════════════════════════
-          echo "[+] Applying stealth abstract socket filtering to net/unix/af_unix.c..."
+          echo "[+] Applying stealth abstract socket filtering to unix_seq_show in net/unix/af_unix.c..."
           python3 -c '
           c = open("net/unix/af_unix.c").read()
-          target = "struct unix_sock *u = unix_sk(s);"
-          stealth = """struct unix_sock *u = unix_sk(s);
+          old_seq = "static int unix_seq_show(struct seq_file *seq, void *v)\n{"
+          new_seq = """static int unix_seq_show(struct seq_file *seq, void *v)
+          {
           #ifdef CONFIG_KSU_SUSFS
-          \tif (current_uid().val >= 10000 && u->addr && UNIX_ABSTRACT(s)) {
-          \t\tint path_len = u->addr->len - sizeof(short);
-          \t\tif (path_len >= 32) return 0;
+          \tif (v != SEQ_START_TOKEN && current_uid().val >= 10000) {
+          \t\tstruct sock *s_check = v;
+          \t\tstruct unix_sock *u_check = unix_sk(s_check);
+          \t\tif (u_check && u_check->addr && UNIX_ABSTRACT(s_check)) {
+          \t\t\tint plen = u_check->addr->len - sizeof(short);
+          \t\t\tif (plen >= 32) return 0;
+          \t\t}
           \t}
           #endif"""
-          assert target in c, "target not found in net/unix/af_unix.c"
-          open("net/unix/af_unix.c", "w").write(c.replace(target, stealth, 1))
+          assert old_seq in c, "target unix_seq_show not found in net/unix/af_unix.c"
+          open("net/unix/af_unix.c", "w").write(c.replace(old_seq, new_seq, 1))
           '
 
           # ═══════════════════════════════════════════════════════════════
           # STEALTH PATCH 2: Boot State Spoofing (fs/proc/cmdline.c)
           # Rewrites orange->green, locked=0->1, unlocked->locked in /proc/cmdline
-          # for unprivileged processes.
+          # for unprivileged processes. Uses exact length matches without memory overrun.
           # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying boot state spoofing to fs/proc/cmdline.c..."
           python3 -c '
@@ -216,12 +204,11 @@ jobs:
           \t\t\tif ((p = strstr(buf, "androidboot.verifiedbootstate=orange"))) memcpy(p + 30, "green ", 6);
           \t\t\tif ((p = strstr(buf, "androidboot.flash.locked=0"))) p[25] = "1"[0];
           \t\t\tif ((p = strstr(buf, "androidboot.vbmeta.device_state=unlocked"))) memcpy(p + 32, "locked  ", 8);
-          \t\t\tif ((p = strstr(buf, "androidboot.bootloader=unknown"))) memcpy(p + 23, "Infinix-X6871 ", 14);
           \t\t\tseq_puts(m, buf);
           \t\t\tkfree(buf);
           \t\t\tseq_putc(m, '\''\\n'\'');
           \t\t\treturn 0;
-          \t}
+          \t\t}
           \t}
           #endif"""
           assert target in c, "target not found in fs/proc/cmdline.c"
@@ -249,26 +236,7 @@ jobs:
           '
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 5: Anonymous Executable Memory Hiding (fs/proc/task_mmu.c)
-          # Hides anonymous VM_EXEC regions from /proc/self/maps for UID >= 10000.
-          # Defeats NativeTest "Futile Hide" which scans for injection trampolines.
-          # ═══════════════════════════════════════════════════════════════
-          echo "[+] Applying anonymous executable memory hiding to fs/proc/task_mmu.c..."
-          python3 -c '
-          c = open("fs/proc/task_mmu.c").read()
-          target = "show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);"
-          patch = """#ifdef CONFIG_KSU_SUSFS
-          \tif (current_uid().val >= 10000 && (flags & VM_EXEC) && !file) {
-          \t\treturn;
-          \t}
-          #endif
-          \tshow_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);"""
-          assert target in c, "target not found in fs/proc/task_mmu.c"
-          open("fs/proc/task_mmu.c", "w").write(c.replace(target, patch, 1))
-          '
-
-          # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 6: /proc/version Spoofing (fs/proc/version.c)     [NEW]
+          # STEALTH PATCH 4: /proc/version Spoofing (fs/proc/version.c)
           # For UID >= 10000, replaces /proc/version output with stock-looking
           # compiler and hostname. Fixes leak of custom kernel name and CI hostname.
           # ═══════════════════════════════════════════════════════════════
@@ -297,28 +265,24 @@ jobs:
           '
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 7: /proc/bootconfig Spoofing (fs/proc/bootconfig.c) [NEW]
-          # Injects androidboot.bootloader="Infinix-X6871" into /proc/bootconfig.
-          # First stage Android init reads this to set ro.bootloader and
-          # ro.boot.bootloader cleanly across the entire OS.
+          # STEALTH PATCH 5: filename_lookup IS_ERR pointer safety (fs/namei.c)
+          # Protects against kernel paging request faults when filename is ERR_PTR
           # ═══════════════════════════════════════════════════════════════
-          echo "[+] Applying bootloader spoofing to fs/proc/bootconfig.c..."
+          echo "[+] Adding filename_lookup IS_ERR guard to fs/namei.c..."
           python3 -c '
-          c = open("fs/proc/bootconfig.c").read()
-          target = "if (saved_boot_config)\n\t\tseq_puts(m, saved_boot_config);"
-          patch = """if (saved_boot_config) {
-          \t\tseq_puts(m, saved_boot_config);
-          \t\tif (!strstr(saved_boot_config, "androidboot.bootloader")) {
-          \t\t\tseq_puts(m, "androidboot.bootloader = \\\"Infinix-X6871\\\"\\n");
-          \t\t}
-          \t}"""
+          c = open("fs/namei.c").read()
+          target = "int filename_lookup(int dfd, struct filename *name, unsigned int flags,\n\t\t    struct path *path, struct path *root)\n{"
+          guard = """int filename_lookup(int dfd, struct filename *name, unsigned int flags,
+          \t\t    struct path *path, struct path *root)
+          {
+          \tif (IS_ERR(name))
+          \t\treturn PTR_ERR(name);
+          \tif (!name)
+          \t\treturn -EINVAL;"""
           if target in c:
-              c = c.replace(target, patch, 1)
-          else:
-              idx = c.index("boot_config_proc_show")
-              brace = c.index("{", idx)
-              c = c[:brace+1] + "\n\tseq_puts(m, \"androidboot.bootloader = \\\"Infinix-X6871\\\"\\n\");\n" + c[brace+1:]
-          open("fs/proc/bootconfig.c", "w").write(c)
+              c = c.replace(target, guard, 1)
+              open("fs/namei.c", "w").write(c)
+              print("[+] filename_lookup guard added successfully")
           '
 
           echo "[+] Building ksu_module_susfs.zip..."
