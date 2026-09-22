@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Repack Header v4 boot.img with a new kernel Image / Image.gz
-Preserves exact ramdisk, cmdline, header fields, and pads to original size.
+Preserves exact ramdisk, cmdline, header fields, signature, vbmeta,
+and dynamically updates the AVB2.0 Footer (AvbFooter) at the end of the partition
+so Little Kernel (LK) boots immediately without recovery fallback.
 """
 
 import sys
@@ -32,10 +34,12 @@ def repack(original_boot, new_kernel, output_boot):
     orig_kernel_size, orig_ramdisk_size, os_version, header_size = struct.unpack('<IIII', orig_data[8:24])
     header_version = struct.unpack('<I', orig_data[40:44])[0]
     cmdline = orig_data[44:44+1536]
+    signature_size = struct.unpack('<I', orig_data[1580:1584])[0] if len(orig_data) >= 1584 else 0
 
     print(f"[+] Original Header Version: {header_version}")
     print(f"[+] Original Kernel Size: {orig_kernel_size} bytes")
     print(f"[+] Original Ramdisk Size: {orig_ramdisk_size} bytes")
+    print(f"[+] Original Signature Size: {signature_size} bytes")
 
     # Read new kernel data
     with open(new_kernel, 'rb') as kf:
@@ -55,13 +59,17 @@ def repack(original_boot, new_kernel, output_boot):
     ramdisk_data = orig_data[ramdisk_offset:ramdisk_offset + orig_ramdisk_size]
     print(f"[+] Extracted original ramdisk ({len(ramdisk_data)} bytes)")
 
+    # Extract original signature (4096 bytes) and vbmeta
     orig_sig_offset = ramdisk_offset + math.ceil(orig_ramdisk_size / PAGE_SIZE) * PAGE_SIZE
-    sig_and_avb = orig_data[orig_sig_offset:]
-    signature_size = struct.unpack('<I', orig_data[1580:1584])[0] if len(orig_data) >= 1584 else 0
-    print(f"[+] Extracted original signature & AVB0 ({len(sig_and_avb)} bytes, sig_size: {signature_size})")
+    sig_data = orig_data[orig_sig_offset:orig_sig_offset + signature_size] if signature_size > 0 else b''
+    
+    # Extract vbmeta payload (starts right after signature)
+    orig_vbmeta_offset = orig_sig_offset + signature_size
+    # In stock boot.img, vbmeta size is typically 1664 bytes
+    orig_vbmeta_size = 1664
+    vbmeta_data = orig_data[orig_vbmeta_offset:orig_vbmeta_offset + orig_vbmeta_size]
 
     # Construct new header (v4)
-    # Header size is 1584 bytes, padded to 4096
     hdr_buf = bytearray(PAGE_SIZE)
     hdr_buf[0:8] = b'ANDROID!'
     struct.pack_into('<IIII', hdr_buf, 8, new_kernel_size, orig_ramdisk_size, os_version, header_size)
@@ -82,25 +90,43 @@ def repack(original_boot, new_kernel, output_boot):
     if rem_r > 0:
         ramdisk_padded.extend(b'\x00' * (PAGE_SIZE - rem_r))
 
-    # Combine: Header + Kernel + Ramdisk + Signature/AVB0
+    # Compute new offsets
+    new_sig_offset = PAGE_SIZE + len(new_kernel_padded) + len(ramdisk_padded)
+    new_vbmeta_offset = new_sig_offset + len(sig_data)
+
+    # Construct image up through vbmeta
     repacked = bytearray()
     repacked.extend(hdr_buf)
     repacked.extend(new_kernel_padded)
     repacked.extend(ramdisk_padded)
-    repacked.extend(sig_and_avb)
+    if sig_data:
+        repacked.extend(sig_data)
+    if vbmeta_data:
+        repacked.extend(vbmeta_data)
 
-    # Pad to total original boot image size if needed
+    # Pad to total original boot image size (e.g. 64 MB / 67108864 bytes)
     orig_total_size = len(orig_data)
     if len(repacked) < orig_total_size:
         repacked.extend(b'\x00' * (orig_total_size - len(repacked)))
-    elif len(repacked) > orig_total_size:
-        # Trim excess padding while preserving AVB0
-        repacked = repacked[:orig_total_size]
+    else:
+        print("[-] Warning: Repacked image exceeds original partition size!")
+
+    # Check if stock boot had an AVB footer in the last 64 bytes
+    stock_footer = orig_data[-64:]
+    if stock_footer[:4] == b'AVBf':
+        print(f"[+] Updating AVB Footer at end of partition (vbmeta_offset: {new_vbmeta_offset})...")
+        # Pack updated AvbFooter with big-endian fields:
+        # magic: b'AVBf' (4), version_major: 1 (4), version_minor: 0 (4)
+        # original_image_size: new_vbmeta_offset (8), vbmeta_offset: new_vbmeta_offset (8)
+        # vbmeta_size: orig_vbmeta_size (8), reserved: 28 bytes
+        new_footer = struct.pack('>4sIIQQQ28s', b'AVBf', 1, 0, new_vbmeta_offset, new_vbmeta_offset, orig_vbmeta_size, b'\x00' * 28)
+        repacked[-64:] = new_footer
 
     with open(output_boot, 'wb') as out_f:
         out_f.write(repacked)
 
-    print(f"[+] Successfully repacked with AVB0 & Signature: {output_boot} ({len(repacked)} bytes)")
+    print(f"[+] Successfully repacked: {output_boot} ({len(repacked)} bytes)")
+    print(f"[+] Verified AVB Footer magic at -64: {repacked[-64:-60]}")
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
