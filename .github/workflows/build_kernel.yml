@@ -114,6 +114,15 @@ jobs:
           cp -vf susfs/kernel_patches/include/linux/susfs.h include/linux/
           cp -vf susfs/kernel_patches/include/linux/susfs_def.h include/linux/
 
+          echo "[+] Patching susfs_def.h for universal app hiding (UID >= 10000)..."
+          python3 -c '
+          c = open("include/linux/susfs_def.h").read()
+          old = "return (likely(test_thread_flag(TIF_PROC_UMOUNTED)) &&\n\t\t\tcurrent_uid().val >= 10000);"
+          new = "return (current_uid().val >= 10000);"
+          assert old in c, "target check not found in susfs_def.h"
+          open("include/linux/susfs_def.h", "w").write(c.replace(old, new, 1))
+          '
+
           # Provide ksu_handle_post_execveat_sucompat symbol required by fs/exec.c
           echo -e "\nint ksu_handle_post_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv_user, void *envp_user, int *__never_use_flags, int *retval) { return 0; }" >> fs/susfs.c
 
@@ -141,6 +150,10 @@ jobs:
           \tsusfs_add_default_path_loop("/data/adb");
           \tsusfs_add_default_path_loop("/sdcard/Fox");
           \tsusfs_add_default_path_loop("/data/media/0/Fox");
+          \tsusfs_add_default_path_loop("/sdcard/MT2");
+          \tsusfs_add_default_path_loop("/data/media/0/MT2");
+          \tsusfs_add_default_path_loop("/sdcard/TWRP");
+          \tsusfs_add_default_path_loop("/data/media/0/TWRP");
           \tsusfs_add_default_path_loop("/data/adb/modules");
           \tsusfs_add_default_path_loop("/data/adb/ksu");
           \tsusfs_add_default_path_loop("/data/adb/zygisksu");
@@ -217,7 +230,7 @@ jobs:
           \t\t\tkfree(buf);
           \t\t\tseq_putc(m, '\''\\n'\'');
           \t\t\treturn 0;
-          \t\t}
+          \t}
           \t}
           #endif"""
           assert target in c, "target not found in fs/proc/cmdline.c"
@@ -245,11 +258,11 @@ jobs:
           '
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 4: SELinux Context & Execmem Cloaking (security/selinux/ss/services.c)
-          # a) Returns -EINVAL when apps probe ksu/su/magisk/lsposed/unshare contexts or types
-          # b) Masks PROCESS__EXECMEM permission (bit 25: 0x02000000U) AFTER map_decision for unprivileged processes
+          # STEALTH PATCH 4: SELinux Context Cloaking (security/selinux/ss/services.c)
+          # Returns -EINVAL when apps probe ksu/su/magisk/lsposed/unshare contexts or types.
+          # NOTE: Stock execmem decision is preserved so packers (Garuda Defender) never crash!
           # ═══════════════════════════════════════════════════════════════
-          echo "[+] Applying SELinux context & execmem cloaking to security/selinux/ss/services.c..."
+          echo "[+] Applying SELinux context cloaking to security/selinux/ss/services.c..."
           python3 -c '
           c = open("security/selinux/ss/services.c").read()
           target1 = "/* An empty security context is never valid. */"
@@ -263,11 +276,6 @@ jobs:
           \t/* An empty security context is never valid. */"""
           assert target1 in c, "target1 not found in security/selinux/ss/services.c"
           c = c.replace(target1, patch1, 1)
-
-          target2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);"
-          patch2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);\n#ifdef CONFIG_KSU_SUSFS\n\tif (current_uid().val >= 10000 && orig_tclass == SECCLASS_PROCESS) {\n\t\tavd->allowed &= ~0x02000000U; /* Clear PROCESS__EXECMEM (bit 25) */\n\t}\n#endif"
-          assert target2 in c, "target2 not found in security/selinux/ss/services.c"
-          c = c.replace(target2, patch2, 1)
           open("security/selinux/ss/services.c", "w").write(c)
           '
 
@@ -344,11 +352,30 @@ jobs:
           open("fs/proc/bootconfig.c", "w").write(c)
           '
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 8: VFS Directory Enumeration Filter (fs/readdir.c) [NEW]
+          # Filters out Fox, MT2, and TWRP entries from directory listings for UID >= 10000.
+          # ═══════════════════════════════════════════════════════════════
+          echo "[+] Applying directory enumeration filter to fs/readdir.c..."
+          python3 -c '
+          c = open("fs/readdir.c").read()
+          target = "buf->error = verify_dirent_name(name, namlen);"
+          shield = """#ifdef CONFIG_KSU_SUSFS
+          \tif (current_uid().val >= 10000 && name) {
+          \t\tif (!strcmp(name, "Fox") || !strcmp(name, "MT2") || !strcmp(name, "TWRP"))
+          \t\t\treturn 0;
+          \t}
+          #endif
+          \t""" + target
+          assert target in c, "target not found in fs/readdir.c"
+          open("fs/readdir.c", "w").write(c.replace(target, shield))
+          '
+
           echo "[+] Building ksu_module_susfs.zip..."
           mkdir -p "${GITHUB_WORKSPACE}/artifacts"
           (cd susfs/ksu_module_susfs && zip -r9 "${GITHUB_WORKSPACE}/artifacts/ksu_module_susfs.zip" * -x "*.zip")
 
-          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS deep stealth engine integrated (7 kernel patches)"
+          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS deep stealth engine integrated (8 kernel patches)"
 
       - name: Configure Kernel
         run: |
