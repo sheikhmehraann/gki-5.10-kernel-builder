@@ -55,6 +55,11 @@ def repack(original_boot, new_kernel, output_boot):
     ramdisk_data = orig_data[ramdisk_offset:ramdisk_offset + orig_ramdisk_size]
     print(f"[+] Extracted original ramdisk ({len(ramdisk_data)} bytes)")
 
+    orig_sig_offset = ramdisk_offset + math.ceil(orig_ramdisk_size / PAGE_SIZE) * PAGE_SIZE
+    sig_and_avb = orig_data[orig_sig_offset:]
+    signature_size = struct.unpack('<I', orig_data[1580:1584])[0] if len(orig_data) >= 1584 else 0
+    print(f"[+] Extracted original signature & AVB0 ({len(sig_and_avb)} bytes, sig_size: {signature_size})")
+
     # Construct new header (v4)
     # Header size is 1584 bytes, padded to 4096
     hdr_buf = bytearray(PAGE_SIZE)
@@ -62,6 +67,8 @@ def repack(original_boot, new_kernel, output_boot):
     struct.pack_into('<IIII', hdr_buf, 8, new_kernel_size, orig_ramdisk_size, os_version, header_size)
     struct.pack_into('<I', hdr_buf, 40, header_version)
     hdr_buf[44:44+1536] = cmdline
+    if signature_size > 0:
+        struct.pack_into('<I', hdr_buf, 1580, signature_size)
 
     # Pad kernel to PAGE_SIZE
     new_kernel_padded = bytearray(k_data)
@@ -75,21 +82,25 @@ def repack(original_boot, new_kernel, output_boot):
     if rem_r > 0:
         ramdisk_padded.extend(b'\x00' * (PAGE_SIZE - rem_r))
 
-    # Combine
+    # Combine: Header + Kernel + Ramdisk + Signature/AVB0
     repacked = bytearray()
     repacked.extend(hdr_buf)
     repacked.extend(new_kernel_padded)
     repacked.extend(ramdisk_padded)
+    repacked.extend(sig_and_avb)
 
-    # Pad to total original boot image size (64MB)
+    # Pad to total original boot image size if needed
     orig_total_size = len(orig_data)
     if len(repacked) < orig_total_size:
         repacked.extend(b'\x00' * (orig_total_size - len(repacked)))
+    elif len(repacked) > orig_total_size:
+        # Trim excess padding while preserving AVB0
+        repacked = repacked[:orig_total_size]
 
     with open(output_boot, 'wb') as out_f:
         out_f.write(repacked)
 
-    print(f"[+] Successfully repacked: {output_boot} ({len(repacked)} bytes)")
+    print(f"[+] Successfully repacked with AVB0 & Signature: {output_boot} ({len(repacked)} bytes)")
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
