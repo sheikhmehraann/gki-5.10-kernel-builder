@@ -155,32 +155,7 @@ jobs:
           fi
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 1: Abstract Unix Socket seq_show Filtering (net/unix/af_unix.c)
-          # Hides long random-named abstract sockets from /proc/net/unix for UID >= 10000.
-          # CRITICAL: Hook ONLY unix_seq_show. Never touch __unix_find_socket_byname!
-          # ═══════════════════════════════════════════════════════════════
-          echo "[+] Applying stealth abstract socket filtering to unix_seq_show in net/unix/af_unix.c..."
-          python3 -c '
-          c = open("net/unix/af_unix.c").read()
-          old_seq = "static int unix_seq_show(struct seq_file *seq, void *v)\n{"
-          new_seq = """static int unix_seq_show(struct seq_file *seq, void *v)
-          {
-          #ifdef CONFIG_KSU_SUSFS
-          \tif (v != SEQ_START_TOKEN && current_uid().val >= 10000) {
-          \t\tstruct sock *s_check = v;
-          \t\tstruct unix_sock *u_check = unix_sk(s_check);
-          \t\tif (u_check && u_check->addr && UNIX_ABSTRACT(s_check)) {
-          \t\t\tint plen = u_check->addr->len - sizeof(short);
-          \t\t\tif (plen >= 32) return 0;
-          \t\t}
-          \t}
-          #endif"""
-          assert old_seq in c, "target unix_seq_show not found in net/unix/af_unix.c"
-          open("net/unix/af_unix.c", "w").write(c.replace(old_seq, new_seq, 1))
-          '
-
-          # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 2: Boot State Spoofing (fs/proc/cmdline.c)
+          # STEALTH PATCH 1: Boot State Spoofing (fs/proc/cmdline.c)
           # Rewrites orange->green, locked=0->1, unlocked->locked in /proc/cmdline
           # for unprivileged processes. Uses exact length matches without memory overrun.
           # ═══════════════════════════════════════════════════════════════
@@ -216,7 +191,7 @@ jobs:
           '
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 3: SELinux Policy Read Denial (security/selinux/selinuxfs.c)
+          # STEALTH PATCH 2: SELinux Policy Read Denial (security/selinux/selinuxfs.c)
           # Blocks raw binary SELinux policy reads for UID >= 10000.
           # Safely jumps to err label to release policy_mutex and avoid deadlock.
           # ═══════════════════════════════════════════════════════════════
@@ -236,7 +211,7 @@ jobs:
           '
 
           # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 4: /proc/version Spoofing (fs/proc/version.c)
+          # STEALTH PATCH 3: /proc/version Spoofing (fs/proc/version.c)
           # For UID >= 10000, replaces /proc/version output with stock-looking
           # compiler and hostname. Fixes leak of custom kernel name and CI hostname.
           # ═══════════════════════════════════════════════════════════════
@@ -262,27 +237,6 @@ jobs:
           assert target in c, "target not found in fs/proc/version.c"
           c = header + c.replace(target, patch, 1)
           open("fs/proc/version.c", "w").write(c)
-          '
-
-          # ═══════════════════════════════════════════════════════════════
-          # STEALTH PATCH 5: filename_lookup IS_ERR pointer safety (fs/namei.c)
-          # Protects against kernel paging request faults when filename is ERR_PTR
-          # ═══════════════════════════════════════════════════════════════
-          echo "[+] Adding filename_lookup IS_ERR guard to fs/namei.c..."
-          python3 -c '
-          c = open("fs/namei.c").read()
-          target = "int filename_lookup(int dfd, struct filename *name, unsigned int flags,\n\t\t    struct path *path, struct path *root)\n{"
-          guard = """int filename_lookup(int dfd, struct filename *name, unsigned int flags,
-          \t\t    struct path *path, struct path *root)
-          {
-          \tif (IS_ERR(name))
-          \t\treturn PTR_ERR(name);
-          \tif (!name)
-          \t\treturn -EINVAL;"""
-          if target in c:
-              c = c.replace(target, guard, 1)
-              open("fs/namei.c", "w").write(c)
-              print("[+] filename_lookup guard added successfully")
           '
 
           echo "[+] Building ksu_module_susfs.zip..."
