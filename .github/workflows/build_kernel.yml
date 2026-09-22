@@ -210,45 +210,45 @@ jobs:
           if [ -f "fs/proc/bootconfig.c" ]; then
             echo "[+] Applying bootconfig spoofing to fs/proc/bootconfig.c..."
             python3 -c '
-            c = open("fs/proc/bootconfig.c").read()
-            header = """#ifdef CONFIG_KSU_SUSFS
-            #include <linux/cred.h>
-            #include <linux/string.h>
-            #include <linux/slab.h>
-            #include <linux/sched.h>
-            #endif
-            """
-            target = "static int bootconfig_proc_show(struct seq_file *m, void *v)\n{"
-            patch = """static int bootconfig_proc_show(struct seq_file *m, void *v)
-            {
-            #ifdef CONFIG_KSU_SUSFS
-            \tif (current_uid().val >= 10000 || current->pid == 1) {
-            \t\tif (saved_bootconfig && saved_bootconfig_size > 0) {
-            \t\t\tchar *buf = kmalloc(saved_bootconfig_size + 512, GFP_KERNEL);
-            \t\t\tif (buf) {
-            \t\t\t\tchar *p;
-            \t\t\t\tmemcpy(buf, saved_bootconfig, saved_bootconfig_size);
-            \t\t\t\tbuf[saved_bootconfig_size] = '\''\\0'\'';
-            \t\t\t\tif ((p = strstr(buf, "androidboot.verifiedbootstate = \\\"orange\\\""))) memcpy(p + 33, "green \\\"", 7);
-            \t\t\t\tif ((p = strstr(buf, "androidboot.flash.locked = \\\"0\\\""))) p[28] = '\''1'\'';
-            \t\t\t\tif ((p = strstr(buf, "androidboot.vbmeta.device_state = \\\"unlocked\\\""))) memcpy(p + 35, "locked  \\\"", 9);
-            \t\t\t\tseq_puts(m, buf);
-            \t\t\t\tif (!strstr(buf, "androidboot.bootloader")) seq_puts(m, "androidboot.bootloader = \\\"Infinix-X6871\\\"\\n");
-            \t\t\t\tkfree(buf);
-            \t\t\t\treturn 0;
-            \t\t\t}
-            \t\t} else {
-            \t\t\tseq_puts(m, "androidboot.bootloader = \\\"Infinix-X6871\\\"\\nandroidboot.verifiedbootstate = \\\"green\\\"\\nandroidboot.flash.locked = \\\"1\\\"\\nandroidboot.vbmeta.device_state = \\\"locked\\\"\\n");
-            \t\t\treturn 0;
-            \t\t}
-            \t}
-            #endif"""
-            if target in c:
-                open("fs/proc/bootconfig.c", "w").write(header + c.replace(target, patch, 1))
-                print("[+] Successfully patched fs/proc/bootconfig.c")
-            else:
-                print("[-] Target not found in fs/proc/bootconfig.c, skipping.")
-            '
+c = open("fs/proc/bootconfig.c").read()
+header = """#ifdef CONFIG_KSU_SUSFS
+#include <linux/cred.h>
+#include <linux/string.h>
+#include <linux/slab.h>
+#include <linux/sched.h>
+#endif
+"""
+target = "static int bootconfig_proc_show(struct seq_file *m, void *v)\n{"
+patch = """static int bootconfig_proc_show(struct seq_file *m, void *v)
+{
+#ifdef CONFIG_KSU_SUSFS
+\tif (current_uid().val >= 10000 || current->pid == 1) {
+\t\tif (saved_bootconfig && saved_bootconfig_size > 0) {
+\t\t\tchar *buf = kmalloc(saved_bootconfig_size + 512, GFP_KERNEL);
+\t\t\tif (buf) {
+\t\t\t\tchar *p;
+\t\t\t\tmemcpy(buf, saved_bootconfig, saved_bootconfig_size);
+\t\t\t\tbuf[saved_bootconfig_size] = '\''\\0'\'';
+\t\t\t\tif ((p = strstr(buf, "androidboot.verifiedbootstate = \\\"orange\\\""))) memcpy(p + 33, "green \\\"", 7);
+\t\t\t\tif ((p = strstr(buf, "androidboot.flash.locked = \\\"0\\\""))) p[28] = '\''1'\'';
+\t\t\t\tif ((p = strstr(buf, "androidboot.vbmeta.device_state = \\\"unlocked\\\""))) memcpy(p + 35, "locked  \\\"", 9);
+\t\t\t\tseq_puts(m, buf);
+\t\t\t\tif (!strstr(buf, "androidboot.bootloader")) seq_puts(m, "androidboot.bootloader = \\\"Infinix-X6871\\\"\\n");
+\t\t\t\tkfree(buf);
+\t\t\t\treturn 0;
+\t\t\t}
+\t\t} else {
+\t\t\tseq_puts(m, "androidboot.bootloader = \\\"Infinix-X6871\\\"\\nandroidboot.verifiedbootstate = \\\"green\\\"\\nandroidboot.flash.locked = \\\"1\\\"\\nandroidboot.vbmeta.device_state = \\\"locked\\\"\\n");
+\t\t\treturn 0;
+\t\t}
+\t}
+#endif"""
+if target in c:
+    open("fs/proc/bootconfig.c", "w").write(header + c.replace(target, patch, 1))
+    print("[+] Successfully patched fs/proc/bootconfig.c")
+else:
+    print("[-] Target not found in fs/proc/bootconfig.c, skipping.")
+'
           fi
 
           # ═══════════════════════════════════════════════════════════════
