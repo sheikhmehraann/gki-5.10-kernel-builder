@@ -2,9 +2,6 @@ name: Build Suki-Kernel & NoSU-Kernel (5.10.270) — Deep Stealth
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
@@ -190,13 +187,7 @@ jobs:
           c = c.replace(target1, patch1, 1)
 
           target2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);"
-          patch2 = """map_decision(&policy->map, orig_tclass, avd,
-\t\t     policydb->allow_unknown);
-#ifdef CONFIG_KSU_SUSFS
-\tif (current_uid().val >= 10000 && orig_tclass == SECCLASS_PROCESS) {
-\t\tavd->allowed &= ~PROCESS__EXECMEM;
-\t}
-#endif"""
+          patch2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);\n#ifdef CONFIG_KSU_SUSFS\n\tif (current_uid().val >= 10000 && orig_tclass == SECCLASS_PROCESS) {\n\t\tavd->allowed &= ~PROCESS__EXECMEM;\n\t}\n#endif"
           assert target2 in c, "target2 not found in security/selinux/ss/services.c"
           c = c.replace(target2, patch2, 1)
           open("security/selinux/ss/services.c", "w").write(c)
