@@ -256,7 +256,7 @@ jobs:
           echo "[+] Applying VFS path denial to fs/namei.c..."
           python3 -c '
           c = open("fs/namei.c").read()
-          target = "static int filename_lookup(int dfd, struct filename *name, unsigned flags,"
+          target = "int filename_lookup(int dfd, struct filename *name, unsigned flags,"
           idx = c.index(target)
           brace_idx = c.index("{", idx + len(target))
           check = """{
