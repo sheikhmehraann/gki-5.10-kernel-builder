@@ -18,3 +18,6 @@ tools/SukiSU-Ultra/
 builds/*.zip
 module.prop
 temp_kernels/
+builds_latest/
+builds_modded/
+builds_modded_susfs/

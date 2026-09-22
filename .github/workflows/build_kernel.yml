@@ -1,4 +1,4 @@
-name: Build Suki-Kernel & NoSU-Kernel (5.10.270)
+name: Build Suki-Kernel & NoSU-Kernel (5.10.270) — Deep Stealth
 
 on:
   workflow_dispatch:
@@ -96,6 +96,11 @@ jobs:
             echo "[+] Added VMA_PAD_START fallback to task_mmu.c"
           fi
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 1: Abstract Unix Socket Filtering (net/unix/af_unix.c)
+          # Hides abstract sockets with name length >= 32 from /proc/net/unix
+          # for unprivileged processes. Root daemon sockets use long random names.
+          # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying stealth abstract socket filtering to net/unix/af_unix.c..."
           python3 -c '
           c = open("net/unix/af_unix.c").read()
@@ -111,6 +116,11 @@ jobs:
           open("net/unix/af_unix.c", "w").write(c.replace(target, stealth, 1))
           '
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 2: Boot State Spoofing (fs/proc/cmdline.c)
+          # Rewrites orange->green, locked=0->1, unlocked->locked in /proc/cmdline
+          # for unprivileged processes.
+          # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying boot state spoofing to fs/proc/cmdline.c..."
           python3 -c '
           c = open("fs/proc/cmdline.c").read()
@@ -142,6 +152,11 @@ jobs:
           open("fs/proc/cmdline.c", "w").write(header + c.replace(target, stealth, 1))
           '
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 3: SELinux Policy Read Denial (security/selinux/selinuxfs.c)
+          # Blocks raw binary SELinux policy reads for UID >= 10000.
+          # Prevents Duck Detector from dumping and analyzing injected policy rules.
+          # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying SELinux policy read denial to security/selinux/selinuxfs.c..."
           python3 -c '
           c = open("security/selinux/selinuxfs.c").read()
@@ -154,6 +169,11 @@ jobs:
           open("security/selinux/selinuxfs.c", "w").write(c.replace(target, patch, 1))
           '
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 4: SELinux Context & Execmem Cloaking (security/selinux/ss/services.c)
+          # a) Returns -EINVAL when apps probe ksu/su/magisk context strings
+          # b) Masks PROCESS__EXECMEM permission for unprivileged processes
+          # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying SELinux context & execmem cloaking to security/selinux/ss/services.c..."
           python3 -c '
           c = open("security/selinux/ss/services.c").read()
@@ -180,6 +200,11 @@ jobs:
           open("security/selinux/ss/services.c", "w").write(c)
           '
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 5: Anonymous Executable Memory Hiding (fs/proc/task_mmu.c)
+          # Hides anonymous VM_EXEC regions from /proc/self/maps for UID >= 10000.
+          # Defeats NativeTest "Futile Hide" which scans for injection trampolines.
+          # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying anonymous executable memory hiding to fs/proc/task_mmu.c..."
           python3 -c '
           c = open("fs/proc/task_mmu.c").read()
@@ -194,11 +219,105 @@ jobs:
           open("fs/proc/task_mmu.c", "w").write(c.replace(target, patch, 1))
           '
 
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 6: /proc/version Spoofing (fs/proc/version.c)     [NEW]
+          # For UID >= 10000, replaces /proc/version output with stock-looking
+          # compiler and hostname. Fixes leak of custom kernel name and CI hostname.
+          # ═══════════════════════════════════════════════════════════════
+          echo "[+] Applying /proc/version spoofing to fs/proc/version.c..."
+          python3 -c '
+          c = open("fs/proc/version.c").read()
+          target = "static int version_proc_show(struct seq_file *m, void *v)\n{"
+          header = """#ifdef CONFIG_KSU_SUSFS
+          #include <linux/cred.h>
+          #endif
+          """
+          patch = """static int version_proc_show(struct seq_file *m, void *v)
+          {
+          #ifdef CONFIG_KSU_SUSFS
+          \tif (current_uid().val >= 10000) {
+          \t\tseq_printf(m, "Linux version %s (%s@%s) (%s) %s\\n",
+          \t\t\tutsname()->release, "build", "infinix",
+          \t\t\t"Android (12426897, +pgo, +bolt, +lto, +mlgo, based on r522817) clang version 18.0.1",
+          \t\t\tutsname()->version);
+          \t\treturn 0;
+          \t}
+          #endif"""
+          assert target in c, "target not found in fs/proc/version.c"
+          c = header + c.replace(target, patch, 1)
+          open("fs/proc/version.c", "w").write(c)
+          '
+
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 7: VFS Path Denial (fs/namei.c)                   [NEW]
+          # Returns -ENOENT for /data/adb/* and /debug_ramdisk/* when queried
+          # by unprivileged processes via faccessat2/newfstatat/statx.
+          # ═══════════════════════════════════════════════════════════════
+          echo "[+] Applying VFS path denial to fs/namei.c..."
+          python3 -c '
+          c = open("fs/namei.c").read()
+          target = "static int filename_lookup(int dfd, struct filename *name, unsigned flags,"
+          idx = c.index(target)
+          brace_idx = c.index("{", idx + len(target))
+          check = """{
+          #ifdef CONFIG_KSU_SUSFS
+          \tif (name && name->name && current_uid().val >= 10000) {
+          \t\tconst char *p = name->name;
+          \t\tif (p[0] == \x27/\x27) {
+          \t\t\tif (__builtin_expect(strncmp(p, "/data/adb", 9) == 0 && (p[9] == \x27/\x27 || p[9] == \x27\x5c0\x27), 0))
+          \t\t\t\treturn -ENOENT;
+          \t\t\tif (__builtin_expect(strncmp(p, "/debug_ramdisk", 14) == 0 && (p[14] == \x27/\x27 || p[14] == \x27\x5c0\x27), 0))
+          \t\t\t\treturn -ENOENT;
+          \t\t}
+          \t}
+          #endif"""
+          c = c[:brace_idx] + check + c[brace_idx+1:]
+          open("fs/namei.c", "w").write(c)
+          '
+
+          # ═══════════════════════════════════════════════════════════════
+          # STEALTH PATCH 8: Mount ID Gap Re-indexing (fs/proc_namespace.c) [NEW]
+          # Dynamically re-indexes mount IDs to eliminate numerical gaps
+          # that MountIdGap detection probes use to find hidden mounts.
+          # ═══════════════════════════════════════════════════════════════
+          echo "[+] Applying mount ID gap re-indexing to fs/proc_namespace.c..."
+          python3 -c '
+          c = open("fs/proc_namespace.c").read()
+          target = "static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)\n{"
+          if target in c:
+              patch = """static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
+          {
+          #ifdef CONFIG_KSU_SUSFS
+          \tstatic int fake_mnt_id_counter = 100;
+          \tint display_mnt_id, display_parent_id;
+          \tif (current_uid().val >= 10000) {
+          \t\tdisplay_mnt_id = fake_mnt_id_counter++;
+          \t\tdisplay_parent_id = display_mnt_id > 100 ? display_mnt_id - 1 : 1;
+          \t} else {
+          \t\tdisplay_mnt_id = mnt->mnt_id;
+          \t\tdisplay_parent_id = mnt->mnt_parent ? mnt->mnt_parent->mnt_id : 0;
+          \t}
+          #endif"""
+              c = c.replace(target, patch, 1)
+              old_id = "r->mnt.mnt_id"
+              if old_id in c:
+                  idx = c.index(patch) + len(patch)
+                  rest = c[idx:]
+                  if old_id in rest:
+                      first = rest.index(old_id)
+                      rest = rest[:first] + "display_mnt_id" + rest[first+len(old_id):]
+                      c = c[:idx] + rest
+              open("fs/proc_namespace.c", "w").write(c)
+              print("[OK] Mount ID gap fix applied")
+          else:
+              print("[SKIP] show_mountinfo signature not found, skipping mount ID gap fix")
+          '
+
           echo "[+] Building ksu_module_susfs.zip..."
           mkdir -p "${GITHUB_WORKSPACE}/artifacts"
           (cd susfs/ksu_module_susfs && zip -r9 "${GITHUB_WORKSPACE}/artifacts/ksu_module_susfs.zip" * -x "*.zip")
 
-          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS stealth engine integrated successfully"
+          echo "[+] SukiSU-Ultra v4.2.0 & SuSFS deep stealth engine integrated (8 patches)"
 
       - name: Configure Kernel
         run: |
@@ -277,6 +396,13 @@ jobs:
 
           make O=out olddefconfig savedefconfig
 
+          # Force ENABLE_LOG=n AFTER olddefconfig (Kconfig default is y, olddefconfig resets it)
+          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
+            sed -i 's/CONFIG_KSU_SUSFS_ENABLE_LOG=y/# CONFIG_KSU_SUSFS_ENABLE_LOG is not set/' out/.config
+            make O=out olddefconfig
+            echo "[+] Forced KSU_SUSFS_ENABLE_LOG=n (prevents dmesg leaks)"
+          fi
+
       - name: Compile Kernel (Image)
         run: |
           cd kernel_src
@@ -284,6 +410,12 @@ jobs:
 
           # Native stock naming from CONFIG_LOCALVERSION
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="" LTO=thin
+
+          # Build environment spoofing — stock OEM builder identity
+          export KBUILD_BUILD_USER="build"
+          export KBUILD_BUILD_HOST="infinix"
+          export KBUILD_BUILD_TIMESTAMP="Mon Jan  1 00:00:00 UTC 2026"
+
           make -j$(nproc --all) O=out Image
 
       - name: Package AnyKernel3 Zip
