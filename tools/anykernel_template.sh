@@ -21,7 +21,7 @@ supported.patchlevels=
 BLOCK=boot;
 IS_SLOT_DEVICE=auto;
 RAMDISK_COMPRESSION=auto;
-PATCH_VBMETA_FLAG=auto;
+PATCH_VBMETA_FLAG=0;
 
 # Import functions/variables and setup patching - see for reference (DO NOT REMOVE)
 . tools/ak3-core.sh;

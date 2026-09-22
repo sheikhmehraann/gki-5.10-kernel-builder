@@ -152,16 +152,19 @@ jobs:
           # ═══════════════════════════════════════════════════════════════
           # STEALTH PATCH 3: SELinux Policy Read Denial (security/selinux/selinuxfs.c)
           # Blocks raw binary SELinux policy reads for UID >= 10000.
-          # Prevents Duck Detector from dumping and analyzing injected policy rules.
+          # Safely jumps to err label to release policy_mutex and avoid deadlock.
           # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying SELinux policy read denial to security/selinux/selinuxfs.c..."
           python3 -c '
           c = open("security/selinux/selinuxfs.c").read()
-          target = "ret = avc_has_perm(&selinux_state,"
+          target = "rc = avc_has_perm(&selinux_state,\n\t\t\t  current_sid(), SECINITSID_SECURITY,\n\t\t\t  SECCLASS_SECURITY, SECURITY__READ_POLICY, NULL);"
           patch = """#ifdef CONFIG_KSU_SUSFS
-          \tif (current_uid().val >= 10000) return -EACCES;
+          \tif (current_uid().val >= 10000) {
+          \t\trc = -EACCES;
+          \t\tgoto err;
+          \t}
           #endif
-          \tret = avc_has_perm(&selinux_state,"""
+          \t""" + target
           assert target in c, "target not found in security/selinux/selinuxfs.c"
           open("security/selinux/selinuxfs.c", "w").write(c.replace(target, patch, 1))
           '
@@ -169,7 +172,7 @@ jobs:
           # ═══════════════════════════════════════════════════════════════
           # STEALTH PATCH 4: SELinux Context & Execmem Cloaking (security/selinux/ss/services.c)
           # a) Returns -EINVAL when apps probe ksu/su/magisk/lsposed/unshare contexts or types
-          # b) Masks PROCESS__EXECMEM permission AFTER map_decision for unprivileged processes
+          # b) Masks PROCESS__EXECMEM permission (bit 25: 0x02000000U) AFTER map_decision for unprivileged processes
           # ═══════════════════════════════════════════════════════════════
           echo "[+] Applying SELinux context & execmem cloaking to security/selinux/ss/services.c..."
           python3 -c '
@@ -187,7 +190,7 @@ jobs:
           c = c.replace(target1, patch1, 1)
 
           target2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);"
-          patch2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);\n#ifdef CONFIG_KSU_SUSFS\n\tif (current_uid().val >= 10000 && orig_tclass == SECCLASS_PROCESS) {\n\t\tavd->allowed &= ~PROCESS__EXECMEM;\n\t}\n#endif"
+          patch2 = "map_decision(&policy->map, orig_tclass, avd,\n\t\t     policydb->allow_unknown);\n#ifdef CONFIG_KSU_SUSFS\n\tif (current_uid().val >= 10000 && orig_tclass == SECCLASS_PROCESS) {\n\t\tavd->allowed &= ~0x02000000U; /* Clear PROCESS__EXECMEM (bit 25) */\n\t}\n#endif"
           assert target2 in c, "target2 not found in security/selinux/ss/services.c"
           c = c.replace(target2, patch2, 1)
           open("security/selinux/ss/services.c", "w").write(c)
@@ -292,8 +295,7 @@ jobs:
           # Authentic Stock Android GKI Versioning
           scripts/config --file out/.config \
             --set-str CONFIG_LOCALVERSION "-android12-9-00014-gf82f7360927e-ab14119954" \
-            -d CONFIG_LOCALVERSION_AUTO \
-            --set-val CONFIG_LOCALVERSION_AUTO n
+            -d CONFIG_LOCALVERSION_AUTO
 
           # 1. Performance & Compiler Optimizations (ThinLTO, skip runtime CFI overhead on hot paths)
           scripts/config --file out/.config \
