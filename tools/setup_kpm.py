@@ -46,6 +46,14 @@ int do_kpm(void __user *arg);
 #define CMD_KPM_CONTROL 1
 #define CMD_KPM_CONTROL_MAX 10
 
+#define SUKISU_KPM_LOAD 1
+#define SUKISU_KPM_UNLOAD 2
+#define SUKISU_KPM_NUM 3
+#define SUKISU_KPM_LIST 4
+#define SUKISU_KPM_INFO 5
+#define SUKISU_KPM_CONTROL 6
+#define SUKISU_KPM_VERSION 7
+
 #endif
 """)
 
