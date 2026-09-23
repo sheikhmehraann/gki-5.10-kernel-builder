@@ -75,6 +75,7 @@ jobs:
         run: |
           cd kernel_src
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          python3 -c "import re; p='KernelSU/kernel/supercall/dispatch.c'; s=open(p).read(); open(p,'w').write(re.sub(r'(\.flags = 0 };)', r'\1\n    cmd.flags |= KSU_GET_INFO_FLAG_LKM;', s))"
 
       - name: Configure Kernel
         run: |
