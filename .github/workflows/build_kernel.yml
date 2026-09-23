@@ -100,7 +100,12 @@ jobs:
             --set-str CONFIG_LOCALVERSION "-android12-9-00014-gf82f7360927e-ab14119954" \
             -d CONFIG_LOCALVERSION_AUTO
 
-          scripts/config --file out/.config -e KSU -e KPM
+          scripts/config --file out/.config \
+            -e KSU -e KPM \
+            -e TCP_CONG_BBR \
+            --set-str CONFIG_DEFAULT_TCP_CONG "bbr" \
+            -e NET_SCH_FQ \
+            --set-str CONFIG_DEFAULT_NET_SCH "fq"
 
           make O=out olddefconfig
 

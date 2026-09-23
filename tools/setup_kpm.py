@@ -143,7 +143,7 @@ static int do_enable_kpm(void __user *arg)
 #endif
 """
     if "KSU_IOCTL_ENABLE_KPM" not in dispatch:
-        dispatch = kpm_handlers + dispatch
+        dispatch = dispatch.replace("#include <linux/uaccess.h>", "#include <linux/uaccess.h>\n" + kpm_handlers)
 
         # Add to ksu_ioctl_handlers table
         table_entry = """#ifdef CONFIG_KPM
