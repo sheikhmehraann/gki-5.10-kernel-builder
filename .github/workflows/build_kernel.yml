@@ -71,11 +71,10 @@ jobs:
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
 
-      - name: Integrate Official KernelSU with KPM
+      - name: Integrate SukiSU-Ultra with Native KPM
         run: |
           cd kernel_src
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-          python3 "${GITHUB_WORKSPACE}/tools/setup_kpm.py" KernelSU
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v4.2.0
 
       - name: Configure Kernel
         run: |
@@ -160,7 +159,7 @@ jobs:
           cp "$IMG_SRC" tools/AnyKernel3/Image
           (cd tools/AnyKernel3 && zip -r9 "${GITHUB_WORKSPACE}/artifacts/KernelSU-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip")
 
-          curl -fLo artifacts/KernelSU_v3.3.0.apk https://github.com/tiann/KernelSU/releases/download/v3.3.0/KernelSU_v3.3.0_32601-release.apk
+          curl -fLo artifacts/SukiSU_v4.2.0.apk https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v4.2.0/SukiSU_v4.2.0_40900-release.apk
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
