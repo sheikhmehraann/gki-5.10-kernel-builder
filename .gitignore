@@ -21,3 +21,7 @@ temp_kernels/
 builds_latest/
 builds_modded/
 builds_modded_susfs/
+builds/*
+temp_mkp.ko
+*.png
+*.xml
