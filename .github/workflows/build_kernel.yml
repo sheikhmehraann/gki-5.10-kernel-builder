@@ -102,10 +102,15 @@ jobs:
 
           scripts/config --file out/.config \
             -e KSU -e KPM \
+            -e KALLSYMS -e KALLSYMS_ALL -e KPROBES \
+            -e TCP_CONG_ADVANCED \
             -e TCP_CONG_BBR \
             --set-str CONFIG_DEFAULT_TCP_CONG "bbr" \
             -e NET_SCH_FQ \
-            --set-str CONFIG_DEFAULT_NET_SCH "fq"
+            --set-str CONFIG_DEFAULT_NET_SCH "fq" \
+            -e SCHED_AUTOGROUP \
+            -e CPU_FREQ_GOV_PERFORMANCE \
+            -e CPU_FREQ_GOV_SCHEDUTIL
 
           make O=out olddefconfig
 
@@ -131,20 +136,15 @@ jobs:
       - name: Package Artifacts
         run: |
           mkdir -p artifacts
+          IMG_SRC="${GITHUB_WORKSPACE}/kernel_src/out/arch/arm64/boot/Image"
 
-          curl -fLs "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux" -o tools/patch_linux || true
-          if [ -f "tools/patch_linux" ]; then
-            chmod +x tools/patch_linux
-            cd kernel_src/out/arch/arm64/boot
-            ../../../../tools/patch_linux || true
-            if [ -f "oImage" ]; then
-              mv -f oImage Image
-            fi
-            cd ../../../..
+          if [ ! -f "$IMG_SRC" ]; then
+            echo "Error: $IMG_SRC not found!"
+            exit 1
           fi
 
-          cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
-          gzip -9 -c kernel_src/out/arch/arm64/boot/Image > artifacts/Image.gz
+          cp "$IMG_SRC" artifacts/Image
+          gzip -9 -c "$IMG_SRC" > artifacts/Image.gz
 
           rm -rf tools/AnyKernel3
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git tools/AnyKernel3
@@ -157,10 +157,8 @@ jobs:
             chmod +x tools/AnyKernel3/tools/magiskboot
           fi
 
-          cp kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
-          cd tools/AnyKernel3
-          zip -r9 "../../artifacts/KernelSU-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip"
-          cd ../..
+          cp "$IMG_SRC" tools/AnyKernel3/Image
+          (cd tools/AnyKernel3 && zip -r9 "${GITHUB_WORKSPACE}/artifacts/KernelSU-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip")
 
           curl -fLo artifacts/KernelSU_v3.3.0.apk https://github.com/tiann/KernelSU/releases/download/v3.3.0/KernelSU_v3.3.0_32601-release.apk
 
