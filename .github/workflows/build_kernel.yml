@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build:
     name: Build Kernel (Universal GKI 5.10)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Maximize Build Space
@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential bc bison flex libssl-dev python3 libelf-dev \
+            build-essential bc bison flex libssl-dev python3 python-is-python3 libelf-dev \
             curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: toolchain
-          key: llvm-17.0.6-x86_64
+          key: llvm-17.0.6-x86_64-u24
 
       - name: Setup LLVM Toolchain
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -59,9 +59,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
-          key: ccache-kernel-${{ github.run_id }}
+          key: ccache-kernel-u24-${{ github.run_id }}
           restore-keys: |
-            ccache-kernel-
+            ccache-kernel-u24-
 
       - name: Fetch Android Common Kernel 5.10
         run: |
@@ -140,6 +140,7 @@ jobs:
           fi
 
           ./kptools-linux -p --image "$IMG_SRC" --skey "apatch2026" --kpimg kpimg-android --out Image_patched
+          ls -lh Image_patched
           mv Image_patched "$IMG_SRC"
 
       - name: Package Artifacts
