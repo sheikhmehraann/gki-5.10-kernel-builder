@@ -71,11 +71,11 @@ jobs:
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
 
-      - name: Integrate Official KernelSU
+      - name: Integrate Official KernelSU with KPM
         run: |
           cd kernel_src
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-          python3 -c "import re; p='KernelSU/kernel/supercall/dispatch.c'; s=open(p).read(); open(p,'w').write(re.sub(r'(\.flags = 0 };)', r'\1\n    cmd.flags |= KSU_GET_INFO_FLAG_LKM;', s))"
+          python3 "${GITHUB_WORKSPACE}/tools/setup_kpm.py" KernelSU
 
       - name: Configure Kernel
         run: |
@@ -100,7 +100,7 @@ jobs:
             --set-str CONFIG_LOCALVERSION "-android12-9-00014-gf82f7360927e-ab14119954" \
             -d CONFIG_LOCALVERSION_AUTO
 
-          scripts/config --file out/.config -e KSU
+          scripts/config --file out/.config -e KSU -e KPM
 
           make O=out olddefconfig
 
@@ -126,6 +126,17 @@ jobs:
       - name: Package Artifacts
         run: |
           mkdir -p artifacts
+
+          curl -fLs "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/0.13.0/patch_linux" -o tools/patch_linux || true
+          if [ -f "tools/patch_linux" ]; then
+            chmod +x tools/patch_linux
+            cd kernel_src/out/arch/arm64/boot
+            ../../../../tools/patch_linux || true
+            if [ -f "oImage" ]; then
+              mv -f oImage Image
+            fi
+            cd ../../../..
+          fi
 
           cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
           gzip -9 -c kernel_src/out/arch/arm64/boot/Image > artifacts/Image.gz

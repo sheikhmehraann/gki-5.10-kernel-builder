@@ -1,70 +1,29 @@
-# Android Kernel Workspace — Rama982 & KernelSU
+# GKI 5.10 Kernel Builder
 
-Welcome to the organized workspace for **Android Kernel Development**, focusing on **Rama982** kernels and **KernelSU** integration.
+Automated builder for Android Common Kernel 5.10 GKI with KernelSU and KPM support.
 
----
+## Overview
 
-## 📁 Workspace Directory Structure
+- Kernel: Android Common Kernel 5.10 (android12-5.10-stg-damon, sublevel 270)
+- Root: KernelSU latest (v3.3.0)
+- Kernel Patch Module (KPM): enabled
+- Toolchain: LLVM 17.0.6 (Kernel.org)
+- Packaging: AnyKernel3 universal flashable zip
 
-```text
-C:\Users\Admin\Videos\Github\Kernel\
-├── builds\                         # Flashable packages & prebuilt releases
-│   └── AK3-Rama982-RE-r24-5.10.261-noSU.zip
-│
-├── sources\                        # Cloned kernel source trees
-│   ├── android_kernel_common-5.10\ # Rama982 GKI 5.10 kernel tree (DAMON branch)
-│   ├── android_kernel_alps-5.10\   # MediaTek ALPS 5.10 kernel (MT6789 / Helio G99)
-│   └── ...                         # Other device/common kernel sources
-│
-├── tools\                          # Utilities, manifests, and build helpers
-│   ├── AnyKernel3\                 # Rama's AnyKernel3 flashable packaging template
-│   ├── KernelSU\                   # Official KernelSU repository & driver source
-│   ├── dokar\                      # Docker environment for compiling Android kernels
-│   ├── kernel_manifest\            # Repo manifest for AOSP / Rama kernel builds
-│   ├── kernel_devicetree\          # Kernel devicetree projects
-│   └── sync_rama_kernels.ps1       # Automated clone/sync script for Rama's repos
-│
-└── docs\                           # Documentation & guides
-    └── KERNELSU_GUIDE.md           # Step-by-step KernelSU integration guide
-```
+## Build Configuration
 
----
+- CONFIG_KSU=y
+- CONFIG_KPM=y
+- CONFIG_KALLSYMS=y
+- CONFIG_KALLSYMS_ALL=y
+- CONFIG_KPROBES=y
+- CONFIG_LTO_CLANG_THIN=y
 
-## 🛠️ Rama982 Kernel Ecosystem
+Kernel localversion is set to `-android12-9-00014-gf82f7360927e-ab14119954` with `android-build` build user and host to match stock Android release builds.
 
-- **Developer:** Rama Bondan Prakoso ([@ramabondanp](https://github.com/ramabondanp) / [@rama982](https://github.com/rama982))
-- **Kernel Series:** Rama982 RE (Generic Kernel Image 5.10 & MediaTek platforms)
-- **SourceForge Releases:** [rama982 KERNEL Downloads](https://sourceforge.net/projects/rama982/files/KERNEL/)
-- **Features:**
-  - Android Generic Kernel Image (GKI) 5.10 up to 5.10.261+
-  - DAMON (Data Access Monitor) memory reclaim optimizations
-  - GPU Overclocking (GPUOC) for MT6789 (Helio G99)
-  - AnyKernel3 flashable zips supporting dynamic partitions and slot A/B devices
+## Output Artifacts
 
----
-
-## ⚡ KernelSU Integration
-
-- **Official Website:** [kernelsu.org](https://kernelsu.org/)
-- **Official Repository:** [tiann/KernelSU](https://github.com/tiann/KernelSU)
-
-### Required Kernel Configs:
-```ini
-CONFIG_KSU=y
-CONFIG_OVERLAY_FS=y
-CONFIG_KPROBES=y
-CONFIG_HAVE_KPROBES=y
-CONFIG_KPROBE_EVENTS=y
-```
-
-For full manual and automatic integration instructions, consult [`docs/KERNELSU_GUIDE.md`](docs/KERNELSU_GUIDE.md).
-
----
-
-## 🔄 Automated Repository Management
-
-To clone or update additional kernel source trees from Rama's GitHub profile, run:
-
-```powershell
-pwsh tools/sync_rama_kernels.ps1
-```
+- Image: raw uncompressed kernel image
+- Image.gz: gzip-compressed kernel image
+- KernelSU-5.10.270-Universal.zip: AnyKernel3 recovery flashable package
+- KernelSU_v3.3.0.apk: official manager application
