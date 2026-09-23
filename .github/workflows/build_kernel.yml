@@ -210,11 +210,16 @@ jobs:
           echo "[+] ccache statistics after build:"
           ccache -s
 
-      - name: Package AnyKernel3 Zip
+      - name: Package AnyKernel3 Zip & Standalone Kernel Image
         run: |
           mkdir -p artifacts
 
-          # Fresh upstream AnyKernel3
+          # 1. Standalone Raw Kernel Images for direct fastboot / custom flasher
+          cp -v kernel_src/out/arch/arm64/boot/Image artifacts/Image
+          gzip -9 -c kernel_src/out/arch/arm64/boot/Image > artifacts/Image.gz
+          echo "[+] Generated standalone Image and Image.gz for all 5.10 devices"
+
+          # 2. Fresh upstream AnyKernel3 for universal recovery flashing across all devices
           rm -rf tools/AnyKernel3
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git tools/AnyKernel3
 
@@ -234,17 +239,6 @@ jobs:
           zip -r9 "../../artifacts/${{ matrix.variant }}-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
-      - name: Repack Stock boot.img
-        run: |
-          if [ -f "Stockimgs/boot.img" ]; then
-            echo "[+] Repacking stock boot.img with new kernel..."
-            python3 tools/repack_boot.py Stockimgs/boot.img \
-              kernel_src/out/arch/arm64/boot/Image \
-              "artifacts/${{ matrix.variant }}-5.10.270-boot.img"
-          else
-            echo "[-] No Stockimgs/boot.img found, skipping repack."
-          fi
-
       - name: Include SukiSU Ultra Manager (Suki-Kernel only)
         if: matrix.variant == 'Suki-Kernel'
         run: |
@@ -256,6 +250,6 @@ jobs:
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.variant }}-5.10.270-by-Mehraan
+          name: ${{ matrix.variant }}-5.10.270-Universal-by-Mehraan
           path: artifacts/*
           if-no-files-found: error
