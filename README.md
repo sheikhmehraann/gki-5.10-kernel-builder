@@ -1,22 +1,27 @@
 # GKI 5.10 Kernel Builder
 
-Universal 5.10 GKI kernel with SukiSU-Ultra root and native KPM support.
+Universal 5.10 GKI kernel with APatch root support.
 
 ## Features
 
 - Android Common Kernel 5.10.270 (Rama ACK)
-- SukiSU-Ultra with native KPM (Kernel Patch Module)
+- APatch root via KernelPatch binary patching
 - TCP BBR congestion control with FQ scheduler
 - Thin LTO optimization
-- Pure stock Android naming
+- Pure stock Android kernel naming
 
 ## Output
 
-- `Image` raw kernel
-- `Image.gz` compressed kernel
-- `KernelSU-5.10.270-Universal.zip` AnyKernel3 flashable
-- `SukiSU_v4.2.0.apk` manager
+- `Image` patched kernel
+- `Image.gz` compressed patched kernel
+- `Kernel-5.10.270-Universal.zip` AnyKernel3 flashable
+- `APatch_11224.apk` manager
 
 ## Usage
 
-Flash the AnyKernel3 zip via TWRP or custom recovery. Install SukiSU Ultra manager after boot.
+Flash the AnyKernel3 zip via TWRP or custom recovery.
+Install APatch manager after boot.
+
+SuperKey: `apatch2026`
+
+Enter the SuperKey in APatch manager when prompted to activate root.
