@@ -1,6 +1,6 @@
-name: Build Simple Latest 5.10 Kernel (Universal GKI - SukiSU Root)
+name: Build KernelSU 5.10 GKI
 
-'on':
+on:
   workflow_dispatch:
   push:
     branches:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Suki-Kernel (Universal GKI 5.10)
+    name: Build KernelSU (Universal GKI 5.10)
     runs-on: ubuntu-22.04
 
     steps:
@@ -38,74 +38,49 @@ jobs:
             curl git zip tar xz-utils zlib1g-dev libncurses-dev ccache \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Cache LLVM Toolchain (Kernel.org 17.0.6)
+      - name: Cache LLVM Toolchain
         id: cache-llvm
         uses: actions/cache@v4
         with:
           path: toolchain
           key: llvm-17.0.6-x86_64
 
-      - name: Setup LLVM Toolchain (Kernel.org 17.0.6)
+      - name: Setup LLVM Toolchain
         if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           mkdir -p toolchain
-          echo "[+] Downloading LLVM 17.0.6 (proven MKP-safe compiler)..."
           curl -fL "https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-17.0.6-x86_64.tar.xz" | tar -I "xz -T0" -xf - -C toolchain --strip-components=1
 
       - name: Add LLVM to PATH
         run: |
           echo "${GITHUB_WORKSPACE}/toolchain/bin" >> $GITHUB_PATH
 
-      - name: Setup Compiler Cache (ccache)
+      - name: Setup Compiler Cache
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
-          key: ccache-Suki-Kernel-${{ github.run_id }}
+          key: ccache-KernelSU-${{ github.run_id }}
           restore-keys: |
-            ccache-Suki-Kernel-
+            ccache-KernelSU-
 
       - name: Fetch Android Common Kernel 5.10
         run: |
-          echo "[+] Cloning Android Common Kernel 5.10 (stg-damon branch)..."
           git clone --depth 1 --single-branch --no-tags -b android12-5.10-stg-damon \
             https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
-
-          # Lock sublevel to 270
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
-          echo "[+] Kernel sublevel locked to 5.10.270"
 
-      - name: Integrate SukiSU-Ultra Root Support
+      - name: Integrate Official KernelSU
         run: |
           cd kernel_src
-          echo "[+] Shallow cloning SukiSU-Ultra (builtin branch)..."
-          git clone --depth 1 --single-branch -b builtin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
-
-          echo "[+] Running upstream setup.sh to configure build system hooks..."
-          bash KernelSU/kernel/setup.sh builtin
-
-          # Verify integration
-          echo "[+] Verifying SukiSU integration..."
-          ls -la drivers/kernelsu/ || { echo "ERROR: symlink not created"; exit 1; }
-          grep -q "kernelsu" drivers/Makefile || { echo "ERROR: Makefile not patched"; exit 1; }
-          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || { echo "ERROR: Kconfig not patched"; exit 1; }
-
-          # Lock version cleanly to 40900 to match manager v4.2.0
-          sed -i 's/^KSU_VERSION\s*:=.*/KSU_VERSION     := 40900/' KernelSU/kernel/Makefile 2>/dev/null || true
-          sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-SukiSU-Ultra/' KernelSU/kernel/Makefile 2>/dev/null || true
-
-          echo "[+] Verifying clean universal kernel integrity..."
-          python3 "${GITHUB_WORKSPACE}/tools/patch_kernel.py"
-
-          echo "[+] SukiSU-Ultra root support integrated cleanly for all 5.10 devices"
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
       - name: Configure Kernel
         run: |
           cd kernel_src
           mkdir -p out
 
-          # Pure Android Real Stock GKI Naming
           rm -f .scmversion
           touch .scmversion
           sed -i 's/scm_version="+.*/scm_version=""/' scripts/setlocalversion 2>/dev/null || true
@@ -115,32 +90,24 @@ jobs:
 
           make O=out gki_defconfig
 
-          # Compiler & Linker Settings for Standard GKI (ThinLTO prevents runner OOM, fast build)
           scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
             -d WERROR \
             --set-val CONFIG_FRAME_WARN 2048
 
-          # Standard Universal Android GKI Versioning for All 5.10 Devices
           scripts/config --file out/.config \
             --set-str CONFIG_LOCALVERSION "-android12-9-00014-gf82f7360927e-ab14119954" \
             -d CONFIG_LOCALVERSION_AUTO
 
-          # SukiSU-Ultra Root Support ONLY (NO SuSFS, NO experimental modules)
-          echo "[+] Enabling SukiSU-Ultra root support ONLY..."
-          scripts/config --file out/.config \
-            -e KSU \
-            -d KPM \
-            -d KSU_SUSFS
+          scripts/config --file out/.config -e KSU
 
           make O=out olddefconfig
 
-      - name: Compile Kernel (Image)
+      - name: Compile Kernel
         run: |
           cd kernel_src
           export PATH="${GITHUB_WORKSPACE}/toolchain/bin:$PATH"
 
-          # Configure ccache for fastest builds
           export CCACHE_DIR=/home/runner/.ccache
           export CCACHE_MAXSIZE=8G
           export CCACHE_COMPRESS=1
@@ -148,56 +115,41 @@ jobs:
           ccache -s -z
 
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="" LTO=thin CCACHE=ccache
-
-          # Standard Android GKI builder environment matching real Google stock builds
           export KBUILD_BUILD_USER="android-build"
           export KBUILD_BUILD_HOST="android-build"
           export KBUILD_BUILD_TIMESTAMP="Mon Jan  1 00:00:00 UTC 2026"
 
           make -j$(nproc --all) O=out Image
-
-          echo "[+] ccache statistics after build:"
           ccache -s
 
-      - name: Package AnyKernel3 Zip & Standalone Kernel Image
+      - name: Package Artifacts
         run: |
           mkdir -p artifacts
 
-          # 1. Standalone Raw Kernel Images for direct fastboot / custom flasher
-          cp -v kernel_src/out/arch/arm64/boot/Image artifacts/Image
+          cp kernel_src/out/arch/arm64/boot/Image artifacts/Image
           gzip -9 -c kernel_src/out/arch/arm64/boot/Image > artifacts/Image.gz
-          echo "[+] Generated standalone Image and Image.gz for all 5.10 devices"
 
-          # 2. Fresh upstream AnyKernel3 for universal recovery flashing across all devices
           rm -rf tools/AnyKernel3
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git tools/AnyKernel3
-
-          # Apply template with Suki-Kernel variant
-          cp -vf tools/anykernel_template.sh tools/AnyKernel3/anykernel.sh
-          sed -i "s/VARIANT/Suki-Kernel/" tools/AnyKernel3/anykernel.sh
+          cp tools/anykernel_template.sh tools/AnyKernel3/anykernel.sh
+          sed -i "s/VARIANT/KernelSU/" tools/AnyKernel3/anykernel.sh
           rm -rf tools/AnyKernel3/ramdisk/overlay.d
 
-          # Use Header v4-compatible magiskboot
           if [ -f "tools/magiskboot_arm64" ]; then
-            cp -vf tools/magiskboot_arm64 tools/AnyKernel3/tools/magiskboot
+            cp tools/magiskboot_arm64 tools/AnyKernel3/tools/magiskboot
             chmod +x tools/AnyKernel3/tools/magiskboot
           fi
 
-          cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
+          cp kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/Suki-Kernel-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/KernelSU-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
-      - name: Include SukiSU Ultra Manager
-        run: |
-          if [ -d "managers" ]; then
-            echo "[+] Copying SukiSU Ultra Manager to artifacts..."
-            cp -vf managers/*.apk artifacts/
-          fi
+          curl -fLo artifacts/KernelSU_v3.3.0.apk https://github.com/tiann/KernelSU/releases/download/v3.3.0/KernelSU_v3.3.0_32601-release.apk
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Suki-Kernel-5.10.270-Universal-by-Mehraan
+          name: KernelSU-5.10.270-Universal-by-Mehraan
           path: artifacts/*
           if-no-files-found: error
