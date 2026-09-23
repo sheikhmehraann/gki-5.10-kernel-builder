@@ -32,6 +32,7 @@ jobs:
         with:
           root-reserve-mb: 8192
           temp-reserve-mb: 2048
+          swap-size-mb: 8192
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -149,6 +150,12 @@ jobs:
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LTO=thin
 
           make O=out gki_defconfig
+
+          # Compiler & Linker Settings for Standard GKI (ThinLTO prevents runner OOM, fast 12m build)
+          scripts/config --file out/.config \
+            -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
+            -d WERROR \
+            --set-val CONFIG_FRAME_WARN 2048
 
           # Standard Universal Android GKI Versioning for All 5.10 Devices
           scripts/config --file out/.config \
