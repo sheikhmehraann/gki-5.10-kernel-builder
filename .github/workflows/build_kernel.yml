@@ -2,16 +2,9 @@ name: Build Simple Latest 5.10 Kernel (Universal GKI - SukiSU Root)
 
 'on':
   workflow_dispatch:
-    inputs:
-      variant:
-        description: 'Kernel Variant to build'
-        required: true
-        default: 'Suki-Kernel'
-        type: choice
-        options:
-          - Suki-Kernel
-          - NoSU-Kernel
-          - Both
+  push:
+    branches:
+      - main
 
 concurrency:
   group: kernel-builder-${{ github.workflow }}-${{ github.ref }}
@@ -19,12 +12,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.variant }}
+    name: Build Suki-Kernel (Universal GKI 5.10)
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: ${{ github.event.inputs.variant == 'Both' && fromJSON('["Suki-Kernel", "NoSU-Kernel"]') || (github.event.inputs.variant == 'NoSU-Kernel' && fromJSON('["NoSU-Kernel"]') || fromJSON('["Suki-Kernel"]')) }}
 
     steps:
       - name: Maximize Build Space
@@ -71,27 +60,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
-          key: ccache-${{ matrix.variant }}-${{ github.run_id }}
+          key: ccache-Suki-Kernel-${{ github.run_id }}
           restore-keys: |
-            ccache-${{ matrix.variant }}-
+            ccache-Suki-Kernel-
 
       - name: Fetch Android Common Kernel 5.10
         run: |
-          echo "[+] Cloning Android Common Kernel 5.10 (stg-damon branch, MKP-safe)..."
+          echo "[+] Cloning Android Common Kernel 5.10 (stg-damon branch)..."
           git clone --depth 1 --single-branch --no-tags -b android12-5.10-stg-damon \
             https://github.com/ramabondanp/android_kernel_common-5.10.git kernel_src
           cd kernel_src
 
-          # Lock sublevel to 270 — 271 is impossible (MKP struct mismatch on all builds)
+          # Lock sublevel to 270
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 270/' Makefile
           sed -i 's/^EXTRAVERSION = .*/EXTRAVERSION =/' Makefile
           echo "[+] Kernel sublevel locked to 5.10.270"
 
-      - name: Integrate SukiSU-Ultra & SuSFS (Suki-Kernel only)
-        if: matrix.variant == 'Suki-Kernel'
+      - name: Integrate SukiSU-Ultra Root Support
         run: |
           cd kernel_src
-          echo "[+] Shallow cloning SukiSU-Ultra (builtin branch with pre-integrated SuSFS)..."
+          echo "[+] Shallow cloning SukiSU-Ultra (builtin branch)..."
           git clone --depth 1 --single-branch -b builtin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
 
           echo "[+] Running upstream setup.sh to configure build system hooks..."
@@ -105,36 +93,12 @@ jobs:
 
           # Lock version cleanly to 40900 to match manager v4.2.0
           sed -i 's/^KSU_VERSION\s*:=.*/KSU_VERSION     := 40900/' KernelSU/kernel/Makefile 2>/dev/null || true
-          sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-Mehraan-SukiSU/' KernelSU/kernel/Makefile 2>/dev/null || true
-
-          echo "[+] Fetching SuSFS for GKI 5.10 (simonpunk/susfs4ksu)..."
-          git clone --depth 1 --single-branch -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git susfs
-
-          echo "[+] Copying SuSFS kernel files..."
-          cp -vf susfs/kernel_patches/fs/susfs.c fs/
-          cp -vf susfs/kernel_patches/include/linux/susfs.h include/linux/
-          cp -vf susfs/kernel_patches/include/linux/susfs_def.h include/linux/
-
-          # Provide ksu_handle_post_execveat_sucompat symbol required by fs/exec.c
-          echo -e "\nint ksu_handle_post_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv_user, void *envp_user, int *__never_use_flags, int *retval) { return 0; }" >> fs/susfs.c
-
-          echo "[+] Applying SuSFS 5.10 kernel patch..."
-          patch -p1 < susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-
-          # VMA_PAD_START fallback in task_mmu.c if not defined
-          if grep -q 'VMA_PAD_START(' fs/proc/task_mmu.c && ! grep -qE '#include <linux/pgsize_migration(_inline)?\.h>|define VMA_PAD_START' fs/proc/task_mmu.c; then
-            sed -i '1a #ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif' fs/proc/task_mmu.c
-            echo "[+] Added VMA_PAD_START fallback to task_mmu.c"
-          fi
+          sed -i 's/^KSU_VERSION_FULL\s*:=.*/KSU_VERSION_FULL := v4.2.0-SukiSU-Ultra/' KernelSU/kernel/Makefile 2>/dev/null || true
 
           echo "[+] Verifying clean universal kernel integrity..."
           python3 "${GITHUB_WORKSPACE}/tools/patch_kernel.py"
 
-          echo "[+] Packaging ksu_module_susfs.zip..."
-          mkdir -p "${GITHUB_WORKSPACE}/artifacts"
-          (cd susfs/ksu_module_susfs && zip -r9 "${GITHUB_WORKSPACE}/artifacts/ksu_module_susfs.zip" * -x "*.zip")
-
-          echo "[+] SukiSU-Ultra & SuSFS root support integrated cleanly for all 5.10 devices"
+          echo "[+] SukiSU-Ultra root support integrated cleanly for all 5.10 devices"
 
       - name: Configure Kernel
         run: |
@@ -151,7 +115,7 @@ jobs:
 
           make O=out gki_defconfig
 
-          # Compiler & Linker Settings for Standard GKI (ThinLTO prevents runner OOM, fast 12m build)
+          # Compiler & Linker Settings for Standard GKI (ThinLTO prevents runner OOM, fast build)
           scripts/config --file out/.config \
             -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_FULL -d LTO_NONE \
             -d WERROR \
@@ -159,39 +123,17 @@ jobs:
 
           # Standard Universal Android GKI Versioning for All 5.10 Devices
           scripts/config --file out/.config \
-            --set-str CONFIG_LOCALVERSION "-android12-9-gki" \
+            --set-str CONFIG_LOCALVERSION "-android12-9-00014-gf82f7360927e-ab14119954" \
             -d CONFIG_LOCALVERSION_AUTO
 
-          # Variant Specific: Suki-Kernel with SukiSU-Ultra, KPM, and SuSFS Root Support
-          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
-            echo "[+] Enabling SukiSU-Ultra root support, KPM kernelpatch engine, and SuSFS..."
-            scripts/config --file out/.config \
-              -e KSU \
-              -e KPM \
-              -e KSU_SUSFS \
-              -e KSU_SUSFS_SUS_PATH \
-              -e KSU_SUSFS_SUS_MOUNT \
-              -e KSU_SUSFS_SUS_KSTAT \
-              -e KSU_SUSFS_SPOOF_UNAME \
-              -d KSU_SUSFS_ENABLE_LOG \
-              -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
-              -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
-              -e KSU_SUSFS_OPEN_REDIRECT \
-              -e KSU_SUSFS_SUS_MAP
-          else
-            echo "[+] Configuring NoSU (pure stock, NO root, NO susfs)..."
-            scripts/config --file out/.config \
-              -d KSU -d KPM -d KSU_SUSFS
-          fi
+          # SukiSU-Ultra Root Support ONLY (NO SuSFS, NO experimental modules)
+          echo "[+] Enabling SukiSU-Ultra root support ONLY..."
+          scripts/config --file out/.config \
+            -e KSU \
+            -d KPM \
+            -d KSU_SUSFS
 
           make O=out olddefconfig
-
-          # Force ENABLE_LOG=n AFTER olddefconfig (Kconfig default is y, olddefconfig resets it)
-          if [ "${{ matrix.variant }}" = "Suki-Kernel" ]; then
-            sed -i 's/CONFIG_KSU_SUSFS_ENABLE_LOG=y/# CONFIG_KSU_SUSFS_ENABLE_LOG is not set/' out/.config
-            make O=out olddefconfig
-            echo "[+] Forced KSU_SUSFS_ENABLE_LOG=n (clean dmesg)"
-          fi
 
       - name: Compile Kernel (Image)
         run: |
@@ -207,7 +149,7 @@ jobs:
 
           export LLVM=1 LLVM_IAS=1 ARCH=arm64 LOCALVERSION="" LTO=thin CCACHE=ccache
 
-          # Standard Android GKI builder environment
+          # Standard Android GKI builder environment matching real Google stock builds
           export KBUILD_BUILD_USER="android-build"
           export KBUILD_BUILD_HOST="android-build"
           export KBUILD_BUILD_TIMESTAMP="Mon Jan  1 00:00:00 UTC 2026"
@@ -230,9 +172,9 @@ jobs:
           rm -rf tools/AnyKernel3
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git tools/AnyKernel3
 
-          # Apply template with variant name
+          # Apply template with Suki-Kernel variant
           cp -vf tools/anykernel_template.sh tools/AnyKernel3/anykernel.sh
-          sed -i "s/VARIANT/${{ matrix.variant }}/" tools/AnyKernel3/anykernel.sh
+          sed -i "s/VARIANT/Suki-Kernel/" tools/AnyKernel3/anykernel.sh
           rm -rf tools/AnyKernel3/ramdisk/overlay.d
 
           # Use Header v4-compatible magiskboot
@@ -243,11 +185,10 @@ jobs:
 
           cp -v kernel_src/out/arch/arm64/boot/Image tools/AnyKernel3/Image
           cd tools/AnyKernel3
-          zip -r9 "../../artifacts/${{ matrix.variant }}-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip"
+          zip -r9 "../../artifacts/Suki-Kernel-5.10.270-Universal.zip" * -x ".git*" "README.md" "*.zip"
           cd ../..
 
-      - name: Include SukiSU Ultra Manager (Suki-Kernel only)
-        if: matrix.variant == 'Suki-Kernel'
+      - name: Include SukiSU Ultra Manager
         run: |
           if [ -d "managers" ]; then
             echo "[+] Copying SukiSU Ultra Manager to artifacts..."
@@ -257,6 +198,6 @@ jobs:
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.variant }}-5.10.270-Universal-by-Mehraan
+          name: Suki-Kernel-5.10.270-Universal-by-Mehraan
           path: artifacts/*
           if-no-files-found: error

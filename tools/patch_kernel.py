@@ -9,7 +9,7 @@ import sys
 def main():
     print("[+] Simple clean GKI 5.10 kernel verified.")
     print("[+] Universal support for all Android GKI 5.10 devices.")
-    print("[+] Pure native SukiSU-Ultra & SuSFS root support enabled.")
+    print("[+] Pure native SukiSU-Ultra root support enabled.")
 
 if __name__ == '__main__':
     main()
